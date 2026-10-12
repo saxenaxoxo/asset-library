@@ -165,12 +165,14 @@ test('panel browses folders, organizes, and places the selection at the playhead
     page.evaluate(() => (window as unknown as { __calls: { type: string }[] }).__calls)
   const tiles = page.locator('.tile')
 
-  // Folders view is the default: the tree lists the library folder, opened, and its subfolders.
+  // Browse is the default: the tree lists the library folder (opened) with its folders, and
+  // opening a folder shows its files in the tree and the grid.
   await expect(tiles).toHaveCount(3)
-  await expect(page.locator('.segment.active')).toHaveText('Folders')
-  await expect(page.locator('.tree-row', { hasText: 'SSD' })).toBeVisible()
-  await page.locator('.tree-row', { hasText: 'SFX' }).click()
+  await expect(page.locator('.tab.active')).toHaveText('Browse')
+  await expect(page.locator('.tree-row.section', { hasText: 'SSD' })).toBeVisible()
+  await page.locator('.tree-row.folder', { hasText: 'SFX' }).click()
   await expect(tiles).toHaveCount(1)
+  await expect(page.locator('.tree-row.file', { hasText: 'Whoosh Big.wav' })).toBeVisible()
   await expect(page.locator('.crumbs')).toContainText('SSD')
   await expect(page.locator('.crumbs')).toContainText('SFX')
   await page.locator('.tree-row', { hasText: 'Favorites' }).click()
@@ -179,14 +181,31 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await expect(tiles).toHaveCount(3)
   await expect(page.locator('.badge.alpha')).toHaveCount(1)
 
-  // Search and type filters.
+  // Search, and the favorites-only star next to it.
   await page.fill('.search', 'leak')
   await expect(tiles).toHaveCount(1)
   await page.fill('.search', '')
   await expect(tiles).toHaveCount(3)
-  await page.locator('.chip', { hasText: 'Audio' }).click()
+  await page.locator('.star-toggle').click()
   await expect(tiles).toHaveCount(1)
-  await page.locator('.chip', { hasText: 'All types' }).click()
+  await page.locator('.star-toggle').click()
+  await expect(tiles).toHaveCount(3)
+
+  // The size slider changes the thumbnails.
+  const widthBefore = await tiles.first().evaluate((n) => (n as HTMLElement).offsetWidth)
+  await page.locator('.size-slider').evaluate((n) => {
+    const slider = n as HTMLInputElement
+    slider.value = '220'
+    slider.dispatchEvent(new Event('input'))
+  })
+  await expect
+    .poll(() => tiles.first().evaluate((n) => (n as HTMLElement).offsetWidth))
+    .not.toBe(widthBefore)
+  await page.locator('.size-slider').evaluate((n) => {
+    const slider = n as HTMLInputElement
+    slider.value = '120'
+    slider.dispatchEvent(new Event('input'))
+  })
 
   // No selection preview: the selected tile is highlighted, nothing else.
   await expect(page.locator('.preview')).toHaveCount(0)
@@ -217,6 +236,15 @@ test('panel browses folders, organizes, and places the selection at the playhead
   ).toHaveText('2')
   expect(requests().at(-1)).toEqual({ type: 'set-favorite', id: 'a', favorite: true })
 
+  // ...and from the star in the tree's gutter.
+  await page.locator('.tree-row.folder', { hasText: 'SFX' }).click()
+  await page.locator('.tree-row.file', { hasText: 'Whoosh Big.wav' }).locator('.gutter').click()
+  await expect(
+    page.locator('.tree-row.file', { hasText: 'Whoosh Big.wav' }).locator('.gutter.on')
+  ).toBeVisible()
+  expect(requests().at(-1)).toEqual({ type: 'set-favorite', id: 'c', favorite: true })
+  await page.locator('.tree-row', { hasText: 'All assets' }).click()
+
   // Tags on the selection.
   const whoosh = page.locator('.tile', { hasText: 'Whoosh Big.wav' })
   const node = await whoosh.elementHandle()
@@ -228,10 +256,11 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await page.press('.tag-input', 'Enter')
   await expect(page.locator('.tag', { hasText: 'impact' })).toBeVisible()
   expect(requests().at(-1)).toEqual({ type: 'add-tag', id: 'c', tag: 'impact' })
+  await page.locator('.tree-row.section', { hasText: 'Tags' }).click()
   await expect(page.locator('.tree-row', { hasText: 'impact' })).toBeVisible()
 
   // Import copies files into the folder you're in.
-  await page.locator('.tree-row', { hasText: 'SFX' }).click()
+  await page.locator('.tree-row.folder', { hasText: 'SFX' }).click()
   await page.evaluate(() => {
     ;(window as unknown as { __pick: unknown }).__pick = { files: ['/Users/me/Downloads/Boom.wav'] }
   })
@@ -257,7 +286,7 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await expect(page.locator('.status.ok')).toHaveText('Added New Pack')
 
   // Settings: folders can be removed (after a confirm), files stay put.
-  await page.locator('.icon-button[title="Settings"]').click()
+  await page.locator('.tab', { hasText: 'Settings' }).click()
   await expect(page.locator('.settings-title', { hasText: 'Library folders' })).toBeVisible()
   await expect(page.locator('.folder-name', { hasText: 'SSD' })).toBeVisible()
   await expect(page.locator('.settings')).toContainText('12 MB')
@@ -265,7 +294,7 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await page.locator('.folder-row .button', { hasText: 'Confirm' }).click()
   await expect.poll(() => requests().at(-1)).toEqual({ type: 'remove-folder', rootId: 1 })
   await page.screenshot({ path: 'test-results/panel-settings.png' })
-  await page.locator('.segment', { hasText: 'Folders' }).click()
+  await page.locator('.tab', { hasText: 'Browse' }).click()
 
   // Enter inside a menu belongs to the menu, not to "add at playhead".
   await page.locator('.tile', { hasText: 'Whoosh Big.wav' }).click()

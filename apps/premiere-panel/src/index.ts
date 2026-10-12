@@ -36,9 +36,10 @@ import { engineRunning, readEngineStatus, sendRequest, startEngine } from './eng
 const uxp = require('uxp')
 const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
 const WINDOWS = detectWindows()
-const PANEL_VERSION = '0.2.2'
+const PANEL_VERSION = '0.3.0'
 
-const TILE_MIN = 104
+const TILE_SIZES = { min: 80, max: 240, default: 120 }
+const TREE_ROW = 26
 const GAP = 8
 const CAPTION = 34
 const POLL_MS = 3000
@@ -53,7 +54,9 @@ const KEYS = {
   view: 'assetLibrary.view',
   folder: 'assetLibrary.folder',
   expanded: 'assetLibrary.expanded',
-  tree: 'assetLibrary.tree'
+  tree: 'assetLibrary.tree',
+  treeWidth: 'assetLibrary.treeWidth',
+  tileSize: 'assetLibrary.tileSize'
 }
 
 type KindFilter = NonNullable<CatalogFilter['kind']> | 'favorites'
@@ -77,6 +80,10 @@ interface State {
   /** False until the editor opens or closes a folder; until then library folders start open. */
   expandedSaved: boolean
   treePref: 'auto' | 'shown' | 'hidden'
+  /** Width the editor dragged the tree to, or null for the default. */
+  treeWidth: number | null
+  /** Smallest tile width (the size slider). */
+  tileSize: number
   text: string
   kind: KindFilter
   visible: CatalogAsset[]
@@ -116,11 +123,13 @@ const state: State = {
   catalogMtime: null,
   error: null,
   tab: 'library',
-  view: readJson<'folders' | 'all'>(KEYS.view, 'folders') === 'all' ? 'all' : 'folders',
+  view: 'folders',
   folder: readJson<string>(KEYS.folder, ALL_KEY),
   expanded: new Set(readJson<string[]>(KEYS.expanded, [])),
   expandedSaved: storage.get(KEYS.expanded) !== null,
   treePref: readJson<State['treePref']>(KEYS.tree, 'auto'),
+  treeWidth: readJson<number | null>(KEYS.treeWidth, null),
+  tileSize: readJson<number>(KEYS.tileSize, TILE_SIZES.default),
   text: '',
   kind: 'all',
   visible: [],
@@ -176,49 +185,59 @@ function show(node: HTMLElement, visible: boolean): void {
 
 const app = document.getElementById('app') as HTMLElement
 
-// Top bar: view switch and settings.
+// Top bar: Browse and Settings tabs.
 const topbar = el('div', 'topbar')
-const viewSwitch = el('div', 'segmented')
-const settingsButton = el('div', 'icon-button', '⚙')
-settingsButton.title = 'Settings'
-topbar.append(viewSwitch, el('div', 'spacer'), settingsButton)
+const browseTab = el('div', 'tab', 'Browse')
+const settingsTab = el('div', 'tab', 'Settings')
+topbar.append(browseTab, settingsTab)
 
-// Search and type filters.
+// Search, with a favorites-only star.
 const header = el('div', 'header')
+const favoritesToggle = el('div', 'icon-button star-toggle', '★')
+favoritesToggle.title = 'Show only favorites'
 const search = el('input', 'search')
 search.placeholder = 'Search names, folders and tags'
 search.setAttribute('aria-label', 'Search assets')
-const chips = el('div', 'chips')
-header.append(search, chips)
+header.append(favoritesToggle, search)
 
-// Library: folder tree beside the grid.
+// Library: the folder tree (folders and files), a divider you can drag, and the grid.
 const body = el('div', 'body')
 const treePane = el('div', 'tree')
+const treeHead = el('div', 'tree-head')
+const treeScroll = el('div', 'tree-scroll')
+const treeSpacer = el('div')
+treeSpacer.style.position = 'relative'
+treeScroll.append(treeSpacer)
+treePane.append(treeHead, treeScroll)
+const splitter = el('div', 'splitter', '⋮')
+splitter.title = 'Drag to resize'
 const mainPane = el('div', 'main')
 const toolbar = el('div', 'toolbar')
 const grid = el('div', 'grid')
 mainPane.append(toolbar, grid)
-body.append(treePane, mainPane)
+body.append(treePane, splitter, mainPane)
 
 // Settings.
 const settingsPane = el('div', 'settings')
 
-// Footer: tags of the selection, placement choices, the main action, status.
+// Footer: tags of the selection, placement choices, the main action; then size and status.
 const footer = el('div', 'footer')
 const tagRow = el('div', 'tag-row')
 const controls = el('div', 'controls')
+const bottomRow = el('div', 'bottom-row')
+const sizeSlider = el('input', 'size-slider')
+sizeSlider.type = 'range'
+sizeSlider.min = String(TILE_SIZES.min)
+sizeSlider.max = String(TILE_SIZES.max)
+sizeSlider.step = '4'
+sizeSlider.value = String(state.tileSize)
+sizeSlider.title = 'Thumbnail size'
+sizeSlider.setAttribute('aria-label', 'Thumbnail size')
 const statusLine = el('div', 'status')
-footer.append(tagRow, controls, statusLine)
+bottomRow.append(sizeSlider, statusLine)
+footer.append(tagRow, controls, bottomRow)
 
 app.append(topbar, header, body, settingsPane, footer)
-
-const KINDS: { id: KindFilter; label: string }[] = [
-  { id: 'all', label: 'All types' },
-  { id: 'video', label: 'Video' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'image', label: 'Images' },
-  { id: 'template', label: 'Templates' }
-]
 
 function setStatus(text: string, tone: Tone = 'info'): void {
   state.status = { text, tone }
@@ -531,7 +550,8 @@ interface Layout {
 
 function layout(): Layout {
   const width = Math.max(0, grid.clientWidth - GAP * 2)
-  const columns = Math.max(1, Math.floor((width + GAP) / (TILE_MIN + GAP)))
+  // The slider sets the tile width you'd like; the nearest column count that fits wins.
+  const columns = Math.max(1, Math.round((width + GAP) / (state.tileSize + GAP)))
   const tileWidth = Math.floor((width - GAP * (columns - 1)) / columns)
   const thumbHeight = Math.round((tileWidth * 9) / 16)
   return { columns, tileWidth, thumbHeight, rowHeight: thumbHeight + CAPTION + GAP }
@@ -638,21 +658,35 @@ function buildTile(asset: CatalogAsset, box: Layout): HTMLElement {
 
   tile.addEventListener('click', () => select(asset))
   tile.addEventListener('dblclick', () => void place(asset))
-  if (canDrag) {
-    const contentType = dragContentType(asset.name)
-    if (contentType) {
-      tile.setAttribute('draggable', 'true')
-      tile.addEventListener('dragstart', (event) => {
-        const payload = {
-          version: '1.0.0',
-          items: [{ name: asset.name, content_type: contentType, uri: fileUri(asset.path) }]
-        }
-        event.dataTransfer?.setData('text/plain', JSON.stringify(payload))
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
-      })
-    }
-  }
+  makeDraggable(tile, asset)
   return tile
+}
+
+/** Drag onto Premiere's timeline (Premiere 27+ only). */
+function makeDraggable(node: HTMLElement, asset: CatalogAsset): void {
+  if (!canDrag) return
+  const contentType = dragContentType(asset.name)
+  if (!contentType) return
+  node.setAttribute('draggable', 'true')
+  node.addEventListener('dragstart', (event) => {
+    const payload = {
+      version: '1.0.0',
+      items: [{ name: asset.name, content_type: contentType, uri: fileUri(asset.path) }]
+    }
+    event.dataTransfer?.setData('text/plain', JSON.stringify(payload))
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+  })
+}
+
+/** Scrolls the grid so an asset's tile is in view. */
+function scrollGridTo(id: string): void {
+  const index = state.visible.findIndex((asset) => asset.id === id)
+  if (index < 0) return
+  const box = layout()
+  const top = Math.floor(index / box.columns) * box.rowHeight
+  if (top < grid.scrollTop || top + box.rowHeight > grid.scrollTop + grid.clientHeight)
+    grid.scrollTop = Math.max(0, top - box.rowHeight)
+  renderGrid()
 }
 
 /** Tiles currently in the DOM, by asset ID. Kept across renders so clicks, double-clicks and
@@ -729,10 +763,10 @@ function renderEmpty(): void {
     )
     return
   }
-  if (state.kind !== 'all') {
-    renderMessage(`No ${state.kind === 'image' ? 'images' : state.kind} in ${scopeName()}`, '', [
+  if (state.kind === 'favorites') {
+    renderMessage(`No favorites in ${scopeName()}`, 'Click the ★ next to a file, or press F.', [
       {
-        label: 'Show all types',
+        label: 'Show everything',
         run: () => {
           state.kind = 'all'
           applyFilter(true)
@@ -822,13 +856,20 @@ grid.addEventListener('scroll', () => {
   })
 })
 
-// ── Folder tree ─────────────────────────────────────────────────────────────
+// ── Folder tree (folders and files, virtualized) ────────────────────────────
 
 function treeVisible(): boolean {
   if (state.view !== 'folders') return false
   if (state.treePref === 'shown') return true
   if (state.treePref === 'hidden') return false
   return app.clientWidth === 0 || app.clientWidth >= NARROW_PX
+}
+
+function treeWidth(): number {
+  const width = app.clientWidth || 380
+  const max = Math.max(160, width - 160)
+  const wanted = state.treeWidth ?? Math.round(width * 0.42)
+  return Math.min(max, Math.max(150, wanted))
 }
 
 function openFolder(key: string, resetSearch: boolean): void {
@@ -855,101 +896,268 @@ function toggleExpanded(key: string): void {
   renderTree()
 }
 
-function treeRow(options: {
+interface TreeItem {
+  type: 'special' | 'section' | 'folder' | 'file'
   key: string
-  label: string
-  count: number
   depth: number
+  label: string
+  count?: number
   icon?: string
-  expandable?: boolean
+  expandable: boolean
   offline?: boolean
-}): HTMLElement {
-  const row = el(
-    'div',
-    `tree-row${state.folder === options.key ? ' selected' : ''}${options.offline ? ' offline' : ''}`
-  )
-  row.style.paddingLeft = `${6 + options.depth * 12}px`
-  const caret = el(
-    'span',
-    'caret',
-    options.expandable ? (state.expanded.has(options.key) ? '▾' : '▸') : ''
-  )
-  if (options.expandable) {
-    caret.addEventListener('click', (event) => {
-      event.stopPropagation()
-      toggleExpanded(options.key)
-    })
-  }
-  row.append(caret)
-  if (options.icon) row.append(el('span', 'tree-icon', options.icon))
-  const label = el('span', 'tree-label', options.label)
-  row.append(label, el('span', 'tree-count', options.offline ? 'offline' : String(options.count)))
-  row.title = options.offline ? `${options.label} isn't connected` : options.label
-  row.addEventListener('click', () => openFolder(options.key, false))
-  if (options.expandable) row.addEventListener('dblclick', () => toggleExpanded(options.key))
-  return row
+  asset?: CatalogAsset
 }
 
-function renderFolder(node: FolderNode, list: HTMLElement): void {
-  const expandable = node.children.length > 0
-  list.append(
-    treeRow({
-      key: node.key,
-      label: node.label,
-      count: node.count,
-      depth: node.depth,
-      expandable,
-      offline: !node.online
-    })
-  )
-  if (expandable && state.expanded.has(node.key))
-    for (const child of node.children) renderFolder(child, list)
-}
+const TAGS_SECTION = '*tags'
 
-function renderTree(): void {
-  show(treePane, treeVisible())
-  if (!treeVisible()) return
-  const width = app.clientWidth || 380
-  treePane.style.width = `${Math.min(220, Math.max(130, Math.round(width * 0.36)))}px`
-  const scroll = treePane.scrollTop
-  treePane.textContent = ''
-  const head = el('div', 'tree-head')
-  head.append(
-    el('span', 'tree-title', 'Library'),
-    button('+', 'small', () => void addFolder(), 'Add a folder to your library')
-  )
-  treePane.append(head)
+const byName = (a: CatalogAsset, b: CatalogAsset): number =>
+  a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
 
+/** Every row the tree would show with the current folders opened, top to bottom. */
+function treeItems(): TreeItem[] {
   const catalog = state.catalog
-  if (!catalog) return
+  if (!catalog) return []
   const all = catalog.assets.map(effective)
-  const list = el('div', 'tree-list')
-  list.append(treeRow({ key: ALL_KEY, label: 'All assets', count: all.length, depth: 0 }))
-  list.append(
-    treeRow({
+  const items: TreeItem[] = [
+    {
+      type: 'special',
+      key: ALL_KEY,
+      depth: 0,
+      label: 'All assets',
+      count: all.length,
+      expandable: false
+    },
+    {
+      type: 'special',
       key: FAVORITES_KEY,
+      depth: 0,
       label: 'Favorites',
       icon: '★',
       count: all.filter((a) => a.favorite).length,
-      depth: 0
+      expandable: false
+    }
+  ]
+  // Files directly in each folder, by folder key.
+  const files = new Map<string, CatalogAsset[]>()
+  for (const asset of all) {
+    const rootId = asset.rootId ?? catalog.roots.find((r) => r.label === asset.root)?.id
+    if (rootId === undefined) continue
+    const key = folderKey(rootId, asset.folder)
+    const list = files.get(key)
+    if (list) list.push(asset)
+    else files.set(key, [asset])
+  }
+  const walk = (node: FolderNode, depth: number): void => {
+    for (const child of node.children) {
+      const childFiles = files.get(child.key)?.length ?? 0
+      items.push({
+        type: 'folder',
+        key: child.key,
+        depth,
+        label: child.label,
+        count: child.count,
+        expandable: child.children.length > 0 || childFiles > 0,
+        offline: !child.online
+      })
+      if (state.expanded.has(child.key)) walk(child, depth + 1)
+    }
+    for (const asset of (files.get(node.key) ?? []).sort(byName))
+      items.push({
+        type: 'file',
+        key: `file:${asset.id}`,
+        depth,
+        label: asset.name,
+        expandable: false,
+        asset
+      })
+  }
+  for (const root of buildFolderTree({ ...catalog, assets: all })) {
+    items.push({
+      type: 'section',
+      key: root.key,
+      depth: 0,
+      label: root.label,
+      count: root.count,
+      expandable: true,
+      offline: !root.online
     })
-  )
-  const folders = buildFolderTree({ ...catalog, assets: all })
-  if (folders.length > 0) list.append(el('div', 'tree-section', 'Folders'))
-  for (const node of folders) renderFolder(node, list)
-
+    if (state.expanded.has(root.key)) walk(root, 1)
+  }
   const tags = new Map<string, number>()
   for (const asset of all) for (const tag of asset.tags) tags.set(tag, (tags.get(tag) ?? 0) + 1)
   if (tags.size > 0) {
-    list.append(el('div', 'tree-section', 'Tags'))
-    for (const [tag, count] of [...tags].sort((a, b) => a[0].localeCompare(b[0])))
-      list.append(treeRow({ key: tagKey(tag), label: tag, icon: '#', count, depth: 0 }))
+    items.push({ type: 'section', key: TAGS_SECTION, depth: 0, label: 'Tags', expandable: true })
+    if (state.expanded.has(TAGS_SECTION))
+      for (const [tag, count] of [...tags].sort((a, b) => a[0].localeCompare(b[0])))
+        items.push({
+          type: 'special',
+          key: tagKey(tag),
+          depth: 1,
+          label: tag,
+          icon: '#',
+          count,
+          expandable: false
+        })
   }
-  if (folders.length === 0)
-    list.append(button('Add folder', 'tree-add', () => void addFolder(), 'Add a folder'))
-  treePane.append(list)
-  treePane.scrollTop = scroll
+  return items
 }
+
+/** Clicking a file in the tree: show its folder in the grid, with the file selected. */
+function selectFromTree(asset: CatalogAsset): void {
+  const rootId =
+    asset.rootId ?? state.catalog?.roots.find((r) => r.label === asset.root)?.id ?? null
+  if (rootId !== null) {
+    const key = folderKey(rootId, asset.folder)
+    if (state.folder !== key) {
+      state.folder = key
+      save(KEYS.folder, key)
+      if (state.text) {
+        state.text = ''
+        search.value = ''
+      }
+    }
+  }
+  state.selectedId = asset.id
+  state.editingTag = false
+  state.status = null
+  applyFilter(false)
+  scrollGridTo(asset.id)
+}
+
+function typeIcon(asset: CatalogAsset): string {
+  return asset.kind === 'image' ? 'image' : asset.kind
+}
+
+function treeRowNode(item: TreeItem, index: number): HTMLElement {
+  const selectedRow =
+    item.type === 'file' ? item.asset?.id === state.selectedId : state.folder === item.key
+  const row = el(
+    'div',
+    `tree-row ${item.type}${selectedRow ? ' selected' : ''}${item.offline ? ' offline' : ''}`
+  )
+  row.style.top = `${index * TREE_ROW}px`
+  // Favorite star in the gutter, for files.
+  const gutter = el('span', 'gutter')
+  if (item.type === 'file' && item.asset) {
+    const asset = item.asset
+    gutter.textContent = '★'
+    if (asset.favorite) gutter.classList.add('on')
+    gutter.title = asset.favorite ? 'Remove from Favorites' : 'Add to Favorites'
+    gutter.addEventListener('click', (event) => {
+      event.stopPropagation()
+      toggleFavorite(asset)
+    })
+    gutter.addEventListener('dblclick', (event) => event.stopPropagation())
+  }
+  row.append(gutter)
+  const indent = el('span', 'indent')
+  indent.style.width = `${item.depth * 14}px`
+  row.append(indent)
+  const caret = el(
+    'span',
+    'caret',
+    item.expandable ? (state.expanded.has(item.key) ? '⌄' : '›') : ''
+  )
+  if (item.expandable) {
+    caret.addEventListener('click', (event) => {
+      event.stopPropagation()
+      toggleExpanded(item.key)
+    })
+  }
+  row.append(caret)
+  if (item.type === 'folder') row.append(el('span', 'type-icon folder'))
+  else if (item.type === 'file' && item.asset)
+    row.append(el('span', `type-icon ${typeIcon(item.asset)}`))
+  else if (item.icon) row.append(el('span', 'tree-icon', item.icon))
+  row.append(el('span', 'tree-label', item.label))
+  if (item.type !== 'file')
+    row.append(
+      el(
+        'span',
+        'tree-count',
+        item.offline ? 'offline' : item.count === undefined ? '' : String(item.count)
+      )
+    )
+  row.title = item.offline ? `${item.label} isn't connected` : item.label
+
+  if (item.type === 'file' && item.asset) {
+    const asset = item.asset
+    row.addEventListener('click', () => selectFromTree(asset))
+    row.addEventListener('dblclick', () => void place(asset))
+    makeDraggable(row, asset)
+  } else if (item.key === TAGS_SECTION) {
+    row.addEventListener('click', () => toggleExpanded(item.key))
+  } else {
+    row.addEventListener('click', () => {
+      if (item.expandable && !state.expanded.has(item.key)) {
+        state.expanded.add(item.key)
+        state.expandedSaved = true
+        save(KEYS.expanded, [...state.expanded])
+      }
+      openFolder(item.key, false)
+    })
+    if (item.expandable) row.addEventListener('dblclick', () => toggleExpanded(item.key))
+  }
+  return row
+}
+
+let treeCache: TreeItem[] = []
+
+function renderTree(rebuild = true): void {
+  const visible = treeVisible()
+  show(treePane, visible)
+  show(splitter, visible)
+  if (!visible) return
+  treePane.style.width = `${treeWidth()}px`
+  if (rebuild) {
+    treeHead.textContent = ''
+    treeHead.append(
+      el('span', 'tree-title', 'Library'),
+      button('+ Folder', 'small', () => void addFolder(), 'Add a folder to your library')
+    )
+    treeCache = treeItems()
+  }
+  treeSpacer.style.height = `${treeCache.length * TREE_ROW}px`
+  const first = Math.max(0, Math.floor(treeScroll.scrollTop / TREE_ROW) - 6)
+  const last = Math.min(
+    treeCache.length - 1,
+    Math.ceil((treeScroll.scrollTop + (treeScroll.clientHeight || 600)) / TREE_ROW) + 6
+  )
+  treeSpacer.textContent = ''
+  for (let i = first; i <= last; i++) {
+    const item = treeCache[i]
+    if (item) treeSpacer.append(treeRowNode(item, i))
+  }
+}
+
+let treeFrame = 0
+treeScroll.addEventListener('scroll', () => {
+  if (treeFrame) return
+  treeFrame = requestAnimationFrame(() => {
+    treeFrame = 0
+    renderTree(false)
+  })
+})
+
+// Dragging the divider resizes the tree.
+let dragStart: { x: number; width: number } | null = null
+splitter.addEventListener('mousedown', (event) => {
+  dragStart = { x: event.clientX, width: treeWidth() }
+  event.preventDefault()
+})
+document.addEventListener('mousemove', (event) => {
+  if (!dragStart) return
+  state.treeWidth = dragStart.width + event.clientX - dragStart.x
+  treePane.style.width = `${treeWidth()}px`
+  renderGrid()
+})
+document.addEventListener('mouseup', () => {
+  if (!dragStart) return
+  dragStart = null
+  state.treeWidth = treeWidth()
+  save(KEYS.treeWidth, state.treeWidth)
+  renderGrid()
+})
 
 // ── Toolbar ─────────────────────────────────────────────────────────────────
 
@@ -1158,6 +1366,7 @@ function select(asset: CatalogAsset): void {
   state.selectedId = asset.id
   state.status = null
   renderGrid()
+  renderTree(false)
   renderFooter()
 }
 
@@ -1313,41 +1522,30 @@ function renderFooter(): void {
 // ── Header ──────────────────────────────────────────────────────────────────
 
 function renderHeader(): void {
-  viewSwitch.textContent = ''
-  for (const [id, label] of [
-    ['folders', 'Folders'],
-    ['all', 'All']
-  ] as const) {
-    const seg = el(
-      'div',
-      `segment${state.tab === 'library' && state.view === id ? ' active' : ''}`,
-      label
-    )
-    seg.addEventListener('click', () => {
-      state.tab = 'library'
-      state.view = id
-      save(KEYS.view, id)
-      applyFilter(true)
-    })
-    viewSwitch.append(seg)
-  }
-  if (state.tab === 'settings') settingsButton.classList.add('active')
-  else settingsButton.classList.remove('active')
-
-  chips.textContent = ''
-  for (const kind of KINDS) {
-    const chip = el('div', `chip${state.kind === kind.id ? ' active' : ''}`, kind.label)
-    chip.addEventListener('click', () => {
-      state.kind = kind.id
-      applyFilter(true)
-    })
-    chips.append(chip)
-  }
+  if (state.tab === 'library') browseTab.classList.add('active')
+  else browseTab.classList.remove('active')
+  if (state.tab === 'settings') settingsTab.classList.add('active')
+  else settingsTab.classList.remove('active')
+  if (state.kind === 'favorites') favoritesToggle.classList.add('on')
+  else favoritesToggle.classList.remove('on')
 }
 
-settingsButton.addEventListener('click', () => {
-  state.tab = state.tab === 'settings' ? 'library' : 'settings'
+browseTab.addEventListener('click', () => {
+  state.tab = 'library'
   renderAll()
+})
+settingsTab.addEventListener('click', () => {
+  state.tab = 'settings'
+  renderAll()
+})
+favoritesToggle.addEventListener('click', () => {
+  state.kind = state.kind === 'favorites' ? 'all' : 'favorites'
+  applyFilter(true)
+})
+sizeSlider.addEventListener('input', () => {
+  state.tileSize = Number(sizeSlider.value) || TILE_SIZES.default
+  save(KEYS.tileSize, state.tileSize)
+  renderGrid()
 })
 
 function renderAll(): void {

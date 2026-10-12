@@ -52,27 +52,22 @@ body {
   flex-grow: 1;
 }
 
-.segmented {
-  display: flex;
-  flex-direction: row;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.segment {
-  padding: 3px 12px;
-  color: var(--ink-2);
+.tab {
+  padding: 4px 2px 5px 2px;
+  margin-right: 18px;
+  color: var(--ink-3);
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
   cursor: pointer;
 }
 
-.segment:hover {
-  color: var(--ink);
+.tab:hover {
+  color: var(--ink-2);
 }
 
-.segment.active {
-  background: var(--brand-surface);
-  color: var(--brand-200);
+.tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--ink-2);
 }
 
 .icon-button {
@@ -97,14 +92,29 @@ body {
 }
 
 .header {
-  padding: 8px 8px 6px 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
 
+.star-toggle {
+  margin-right: 6px;
+  color: var(--ink-3);
+  font-size: 14px;
+}
+
+.star-toggle.on {
+  color: var(--brand-400);
+  background: var(--brand-surface);
+}
+
 .search {
   font-family: inherit;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 26px;
   box-sizing: border-box;
   padding: 0 8px;
@@ -115,32 +125,6 @@ body {
   font-size: 12px;
 }
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-
-.chip {
-  padding: 3px 8px;
-  margin: 0 4px 4px 0;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  color: var(--ink-2);
-  cursor: pointer;
-}
-
-.chip:hover {
-  color: var(--ink);
-  border-color: var(--line-strong);
-}
-
-.chip.active {
-  background: var(--brand-surface);
-  border-color: var(--brand-500);
-  color: var(--brand-200);
-}
-
 .body {
   flex: 1;
   display: flex;
@@ -148,12 +132,12 @@ body {
   min-height: 0;
 }
 
-/* Folder tree (Folders view). */
+/* Folder tree: folders and files, like Premiere Composer's Browse panel. */
 .tree {
   flex-shrink: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: var(--panel);
 }
 
@@ -162,6 +146,7 @@ body {
   flex-direction: row;
   align-items: center;
   padding: 6px 6px 4px 10px;
+  border-bottom: 1px solid var(--line);
 }
 
 .tree-title {
@@ -172,20 +157,23 @@ body {
   text-transform: uppercase;
 }
 
-.tree-section {
-  padding: 10px 10px 3px 10px;
-  color: var(--ink-3);
-  font-size: 10px;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+.tree-scroll {
+  flex: 1;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 26px;
   display: flex;
   flex-direction: row;
   align-items: center;
-  height: 24px;
   padding-right: 8px;
+  border-bottom: 1px solid #0d0d10;
   color: var(--ink-2);
   cursor: pointer;
 }
@@ -193,6 +181,15 @@ body {
 .tree-row:hover {
   background: var(--raised);
   color: var(--ink);
+}
+
+.tree-row.section {
+  background: #101014;
+  color: var(--ink);
+}
+
+.tree-row.file {
+  color: var(--ink-2);
 }
 
 .tree-row.selected {
@@ -204,19 +201,70 @@ body {
   color: var(--ink-3);
 }
 
+.gutter {
+  width: 20px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 11px;
+  color: #2c2a35;
+}
+
+.gutter:hover {
+  color: var(--ink-2);
+}
+
+.gutter.on {
+  color: var(--brand-400);
+}
+
+.indent {
+  flex-shrink: 0;
+}
+
 .caret {
   width: 14px;
   flex-shrink: 0;
   color: var(--ink-3);
-  font-size: 10px;
+  font-size: 12px;
   text-align: center;
 }
 
+.type-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  flex-shrink: 0;
+  background-size: 16px 16px;
+  background-repeat: no-repeat;
+}
+
+.type-icon.folder {
+  background-image: url('icons/types/folder.png');
+}
+
+.type-icon.audio {
+  background-image: url('icons/types/audio.png');
+}
+
+.type-icon.video {
+  background-image: url('icons/types/video.png');
+}
+
+.type-icon.image {
+  background-image: url('icons/types/image.png');
+}
+
+.type-icon.template {
+  background-image: url('icons/types/template.png');
+}
+
 .tree-icon {
-  width: 14px;
+  width: 16px;
+  margin-right: 6px;
   flex-shrink: 0;
   color: var(--brand-400);
   font-size: 11px;
+  text-align: center;
 }
 
 .tree-label {
@@ -234,8 +282,24 @@ body {
   font-size: 10px;
 }
 
-.button.tree-add {
-  margin: 8px 10px;
+.splitter {
+  width: 7px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 12px;
+  background: var(--canvas);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  cursor: ew-resize;
+}
+
+.splitter:hover {
+  color: var(--ink);
+  background: var(--raised);
 }
 
 .main {
@@ -656,8 +720,24 @@ body {
   cursor: default;
 }
 
+.bottom-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.size-slider {
+  width: 90px;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
 .status {
-  margin-top: 2px;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-height: 15px;
   color: var(--ink-3);
   font-size: 11px;
