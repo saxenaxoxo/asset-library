@@ -36,7 +36,7 @@ import { engineRunning, readEngineStatus, sendRequest, startEngine } from './eng
 const uxp = require('uxp')
 const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
 const WINDOWS = detectWindows()
-const PANEL_VERSION = '0.3.0'
+const PANEL_VERSION = '0.3.1'
 
 const TILE_SIZES = { min: 80, max: 240, default: 120 }
 const TREE_ROW = 26
@@ -1036,6 +1036,9 @@ function treeRowNode(item: TreeItem, index: number): HTMLElement {
     `tree-row ${item.type}${selectedRow ? ' selected' : ''}${item.offline ? ' offline' : ''}`
   )
   row.style.top = `${index * TREE_ROW}px`
+  // An explicit width: Premiere's panel runtime draws left/right-stretched rows but doesn't
+  // let them receive clicks.
+  row.style.width = `${treeRowWidth}px`
   // Favorite star in the gutter, for files.
   const gutter = el('span', 'gutter')
   if (item.type === 'file' && item.asset) {
@@ -1102,6 +1105,7 @@ function treeRowNode(item: TreeItem, index: number): HTMLElement {
 }
 
 let treeCache: TreeItem[] = []
+let treeRowWidth = 200
 
 function renderTree(rebuild = true): void {
   const visible = treeVisible()
@@ -1109,6 +1113,7 @@ function renderTree(rebuild = true): void {
   show(splitter, visible)
   if (!visible) return
   treePane.style.width = `${treeWidth()}px`
+  treeRowWidth = treeScroll.clientWidth || treeWidth() - 10
   if (rebuild) {
     treeHead.textContent = ''
     treeHead.append(
@@ -1156,7 +1161,8 @@ document.addEventListener('mouseup', () => {
   dragStart = null
   state.treeWidth = treeWidth()
   save(KEYS.treeWidth, state.treeWidth)
-  renderGrid()
+  // Lay out again once the panes have their new sizes.
+  requestAnimationFrame(() => renderAll())
 })
 
 // ── Toolbar ─────────────────────────────────────────────────────────────────
@@ -1500,6 +1506,7 @@ function renderFooter(): void {
   const asset = state.tab === 'library' ? selected() : null
   renderTagRow(asset)
   show(controls, state.tab === 'library')
+  show(sizeSlider, state.tab === 'library')
   setDisabled(placeButton, !asset || state.busy)
 
   const indexing = (state.engine?.indexing.rootIds.length ?? 0) > 0

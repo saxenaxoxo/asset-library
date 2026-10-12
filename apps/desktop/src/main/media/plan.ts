@@ -18,6 +18,11 @@ export interface MediaPlanInput {
   width: number | null
   height: number | null
   platform: NodeJS.Platform
+  /**
+   * Also make playable preview files (H.264 for video, AAC for audio). Off for the engine: the
+   * Premiere panel can't play media, and these are most of the time and disk the cache costs.
+   */
+  previews?: boolean
 }
 
 export const THUMB_WIDTH = 480
@@ -137,7 +142,7 @@ export function mediaPlan(asset: MediaPlanInput): MediaJob[] {
     }
 
     const encoder = h264Encoder(asset.platform)
-    if (encoder && asset.width && asset.height) {
+    if (asset.previews !== false && encoder && asset.width && asset.height) {
       const width = even(Math.min(PREVIEW_WIDTH, asset.width))
       const height = even((width * asset.height) / asset.width)
       const preview = `${base}.preview.mp4`
@@ -198,27 +203,28 @@ export function mediaPlan(asset: MediaPlanInput): MediaJob[] {
       ]
     })
     const preview = `${base}.preview.m4a`
-    jobs.push({
-      output: 'preview',
-      file: preview,
-      args: [
-        ...COMMON,
-        '-i',
-        input,
-        '-t',
-        String(AUDIO_PREVIEW_MAX_SECONDS),
-        '-vn',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '128k',
-        '-ac',
-        '2',
-        '-movflags',
-        '+faststart',
-        preview
-      ]
-    })
+    if (asset.previews !== false)
+      jobs.push({
+        output: 'preview',
+        file: preview,
+        args: [
+          ...COMMON,
+          '-i',
+          input,
+          '-t',
+          String(AUDIO_PREVIEW_MAX_SECONDS),
+          '-vn',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '128k',
+          '-ac',
+          '2',
+          '-movflags',
+          '+faststart',
+          preview
+        ]
+      })
   }
 
   return jobs

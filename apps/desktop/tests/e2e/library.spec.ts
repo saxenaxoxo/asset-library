@@ -49,7 +49,7 @@ test('indexes a folder, reads media details, searches, and keeps favorites', asy
   const overlay = page.getByRole('gridcell', { name: /Purple Glow Overlay/ })
   await expect(overlay.getByText('Alpha')).toBeVisible({ timeout: 20_000 })
 
-  // Thumbnails, scrub strips, previews and waveforms are generated and actually load.
+  // Thumbnails, scrub strips and waveforms are generated and actually load.
   await expect
     .poll(
       () =>
@@ -74,14 +74,15 @@ test('indexes a folder, reads media details, searches, and keeps favorites', asy
           assets: {
             name: string
             thumb: string | null
-            preview: string | null
+            sprite: string | null
             wave: string | null
           }[]
         }
         const byName = Object.fromEntries(catalog.assets.map((a) => [a.name, a]))
         return [
           catalog.assets.length,
-          Boolean(byName['Purple Glow Overlay.mov']?.preview),
+          // Hover-scrub strip (playable preview files aren't made: the panel can't play them).
+          Boolean(byName['Purple Glow Overlay.mov']?.sprite),
           Boolean(byName['Tone Hit.wav']?.wave),
           Boolean(byName['Soft Grain.png']?.thumb)
         ]
@@ -112,7 +113,9 @@ test('indexes a folder, reads media details, searches, and keeps favorites', asy
   await details.getByRole('button', { name: 'Add tag' }).click()
   await expect(details.getByText('impacts')).toBeVisible()
   await page.getByRole('gridcell', { name: /Purple Glow Overlay/ }).click()
-  await expect(details.locator('video')).toBeVisible()
+  // No preview movies are made any more (the Premiere panel can't play them): video shows its
+  // scrubbable thumbnail.
+  await expect(details.locator('img').first()).toBeVisible()
   await page.waitForTimeout(600)
   await page.screenshot({ path: 'test-results/library.png' })
 

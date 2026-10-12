@@ -1,6 +1,7 @@
 import { readdir, rm, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import type { LibraryRepository } from './repository'
+import type { PendingMedia } from './types'
 import type { RootRecord, ScanProgress } from '@shared/library'
 import { parseProbe } from '../media/probe'
 import type { MediaBinaries } from '../media/binaries'
@@ -15,7 +16,8 @@ const PROBE_BATCH = 24
 const PROBE_CONCURRENCY = 2
 const CHANGE_THROTTLE_MS = 400
 const PROGRESS_THROTTLE_MS = 250
-const MEDIA_BATCH = 8
+const MEDIA_BATCH = 12
+const MEDIA_CONCURRENCY = 3
 const CATALOG_DEBOUNCE_MS = 1500
 /** Favorites and tags changed by hand show up in the panel this fast, even while indexing. */
 const CATALOG_URGENT_MS = 300
@@ -258,61 +260,29 @@ export class LibraryService {
     if (!this.stopped) void this.generateMedia()
   }
 
-  /** Generates thumbnails, scrub sprites, previews and waveforms, one asset at a time. */
+  /** Generates thumbnails, scrub sprites and waveforms, a few assets at a time. */
   async generateMedia(): Promise<void> {
     if (this.generating) return
     this.generating = true
     let generated = 0
     try {
-      outer: while (!this.stopped) {
+      while (!this.stopped) {
         const batch = this.repo.pendingMedia(MEDIA_BATCH)
         if (batch.length === 0) break
-        for (const asset of batch) {
-          const epoch = this.mediaEpoch
-          try {
-            const base = `${asset.id}-${asset.key}`
-            const jobs = mediaPlan({
-              ...asset,
-              input: asset.path,
-              base,
-              platform: process.platform
-            })
-            let files =
-              jobs.length > 0
-                ? await this.worker.request({
-                    type: 'media',
-                    ffmpegPath: this.binaries.ffmpeg,
-                    outDir: this.paths.mediaDir,
-                    jobs
-                  })
-                : {}
+        // A few assets at a time: each FFmpeg job is mostly waiting on the disk.
+        const queue = [...batch]
+        let crashed = false
+        const lane = async (): Promise<void> => {
+          for (let asset = queue.shift(); asset && !crashed; asset = queue.shift()) {
+            const ok = await this.makeMedia(asset)
+            if (ok === 'crashed') crashed = true
+            else if (ok === 'made') generated++
             if (this.stopped) return
-            // Nothing we could render (templates, PSDs): use Premiere Composer's preview if any.
-            if (!files.thumb && asset.externalPreview) {
-              const borrowed = await this.borrowPreview(asset.externalPreview, base)
-              if (this.stopped) return
-              files = {
-                ...files,
-                thumb: borrowed.thumb ?? null,
-                sprite: files.sprite ?? borrowed.sprite ?? null
-              }
-            }
-            // The cache was cleared while this ran: its files may be gone. It's made again.
-            if (epoch !== this.mediaEpoch) continue
-            this.repo.saveMedia(asset.id, asset.key, {
-              thumb: files.thumb ?? null,
-              sprite: files.sprite ?? null,
-              preview: files.preview ?? null,
-              wave: files.wave ?? null
-            })
-            generated++
-          } catch (error) {
-            if (this.stopped) return
-            if (isCrash(error)) break outer
-            if (epoch !== this.mediaEpoch) continue
-            this.repo.saveMediaError(asset.id, asset.key)
           }
         }
+        await Promise.all(Array.from({ length: MEDIA_CONCURRENCY }, lane))
+        if (this.stopped) return
+        if (crashed) break
         this.notifyChanged()
       }
     } finally {
@@ -320,6 +290,58 @@ export class LibraryService {
     }
     // Regenerated assets leave their old files behind; sweep once the queue is drained.
     if (generated > 0 && !this.stopped) void this.cleanupMedia()
+  }
+
+  /** Thumbnail, scrub strip and waveform for one asset. Never throws. */
+  private async makeMedia(
+    asset: PendingMedia
+  ): Promise<'made' | 'failed' | 'crashed' | 'stale' | 'stopped'> {
+    const epoch = this.mediaEpoch
+    try {
+      const base = `${asset.id}-${asset.key}`
+      const jobs = mediaPlan({
+        ...asset,
+        input: asset.path,
+        base,
+        platform: process.platform,
+        previews: false
+      })
+      let files =
+        jobs.length > 0
+          ? await this.worker.request({
+              type: 'media',
+              ffmpegPath: this.binaries.ffmpeg,
+              outDir: this.paths.mediaDir,
+              jobs
+            })
+          : {}
+      if (this.stopped) return 'stopped'
+      // Nothing we could render (templates, PSDs): use Premiere Composer's preview if any.
+      if (!files.thumb && asset.externalPreview) {
+        const borrowed = await this.borrowPreview(asset.externalPreview, base)
+        if (this.stopped) return 'stopped'
+        files = {
+          ...files,
+          thumb: borrowed.thumb ?? null,
+          sprite: files.sprite ?? borrowed.sprite ?? null
+        }
+      }
+      // The cache was cleared while this ran: its files may be gone. It's made again.
+      if (epoch !== this.mediaEpoch) return 'stale'
+      this.repo.saveMedia(asset.id, asset.key, {
+        thumb: files.thumb ?? null,
+        sprite: files.sprite ?? null,
+        preview: files.preview ?? null,
+        wave: files.wave ?? null
+      })
+      return 'made'
+    } catch (error) {
+      if (this.stopped) return 'stopped'
+      if (isCrash(error)) return 'crashed'
+      if (epoch !== this.mediaEpoch) return 'stale'
+      this.repo.saveMediaError(asset.id, asset.key)
+      return 'failed'
+    }
   }
 
   /** Makes our thumbnail (and scrub strip) from a Premiere Composer preview, if there is one. */
