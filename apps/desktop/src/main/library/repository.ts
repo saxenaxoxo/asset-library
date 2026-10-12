@@ -495,7 +495,8 @@ export class LibraryRepository {
          from assets a join roots r on r.id = a.root_id
          where a.media_state = 'pending' and a.status = 'ok' and r.status = 'ok'
            and (a.probe_state != 'pending' or a.kind = 'template')
-         order by a.favorite desc, a.added_at desc limit ?`
+         -- Templates first: they only need a quick copy of an existing preview.
+         order by a.favorite desc, a.kind = 'template' desc, a.added_at desc limit ?`
       )
       .all(limit) as {
       id: string
