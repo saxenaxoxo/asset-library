@@ -77,6 +77,12 @@ test('launches into the branded empty library', async () => {
   )
   expect(dragIconEmpty).toBe(false)
 
+  // Our own menu, not Electron's default (which links to Electron and opens dev tools).
+  const menu = await app.evaluate(
+    ({ Menu }) => Menu.getApplicationMenu()?.items.map((item) => item.label) ?? null
+  )
+  expect(menu).toEqual(process.platform === 'darwin' ? ['Asset Library', 'Edit', 'Window'] : null)
+
   await page.waitForTimeout(800) // let the one-time shelf animation settle
   await page.screenshot({ path: 'test-results/shell.png' })
   await app.close()
