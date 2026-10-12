@@ -52,6 +52,14 @@ jobs:
         with:
           name: asset-library-macos
           path: apps/desktop/dist/*.dmg
+      - name: Build and test the Premiere Pro panel (mocked host)
+        run: pnpm --filter asset-library-premiere-panel test:harness
+      - name: Package the Premiere Pro panel
+        run: pnpm panel:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asset-library-premiere-panel
+          path: apps/premiere-panel/release/*.ccx
 
   windows:
     needs: check

@@ -4,6 +4,7 @@ import { mkdir, rm, stat } from 'fs/promises'
 import { join } from 'path'
 import { RootUnavailableError, scanRoot } from './scanner'
 import { PROBE_ARGS } from '../media/probe'
+import { ffmpegVersion } from '../media/version'
 import type { WorkerMessage, WorkerRequest } from './protocol'
 
 const FFPROBE_TIMEOUT_MS = 20_000
@@ -28,8 +29,7 @@ async function handle(request: WorkerRequest): Promise<unknown> {
   switch (request.type) {
     case 'ffprobe-version': {
       const stdout = await run(request.ffprobePath, ['-version'], 10_000)
-      const firstLine = stdout.split('\n')[0] ?? ''
-      return firstLine.replace(/^ffprobe version\s+/, '').split(' ')[0] ?? firstLine
+      return ffmpegVersion(stdout.split('\n')[0] ?? '')
     }
     case 'scan': {
       const filesSeen = await scanRoot({
