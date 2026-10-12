@@ -31,6 +31,12 @@ export interface CatalogAsset {
 export interface Catalog {
   version: number
   updatedAt: number
+  /**
+   * Identifies this full catalog. Changes after it are written to catalog-delta.json against
+   * the same generation, so the panel never re-reads a large catalog for small changes.
+   * Older engines omit it.
+   */
+  generation?: string
   app: string
   /** `path` was added after the first release; older catalogs omit it. */
   roots: { id: number; label: string; online: boolean; path?: string }[]
@@ -64,4 +70,72 @@ export function parseCatalog(json: string): Catalog {
     throw new Error('Your Asset Library app is newer than this panel. Update the panel.')
   }
   return catalog as Catalog
+}
+
+/** Changes since the full catalog of the same generation; cumulative, rewritten each time. */
+export interface CatalogDelta {
+  generation: string
+  /** Goes up with every rewrite of the delta file. */
+  seq: number
+  updatedAt: number
+  /** Always the full current lists (they're small). */
+  roots: Catalog['roots']
+  tags: string[]
+  /** Assets added or changed since the full catalog, complete records. */
+  upserts: CatalogAsset[]
+  /** IDs of assets gone since the full catalog. */
+  removes: string[]
+}
+
+export const CATALOG_DELTA_FILE = 'catalog-delta.json'
+
+/** Parses a delta file, or null if it's unusable. Never throws. */
+export function parseCatalogDelta(json: string): CatalogDelta | null {
+  try {
+    const data = JSON.parse(json) as Partial<CatalogDelta>
+    if (
+      typeof data.generation !== 'string' ||
+      typeof data.seq !== 'number' ||
+      !Array.isArray(data.upserts) ||
+      !Array.isArray(data.removes) ||
+      !Array.isArray(data.roots)
+    )
+      return null
+    return {
+      generation: data.generation,
+      seq: data.seq,
+      updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : 0,
+      roots: data.roots,
+      tags: Array.isArray(data.tags) ? data.tags : [],
+      upserts: data.upserts,
+      removes: data.removes
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The current catalog: the full one with its delta applied. Order is kept (new assets go first,
+ * as in a fresh catalog). Returns the base unchanged if the delta is for another generation.
+ */
+export function applyCatalogDelta(base: Catalog, delta: CatalogDelta): Catalog {
+  if (!base.generation || delta.generation !== base.generation) return base
+  const gone = new Set(delta.removes)
+  const changed = new Map(delta.upserts.map((asset) => [asset.id, asset]))
+  const assets: CatalogAsset[] = []
+  const known = new Set<string>()
+  for (const asset of base.assets) {
+    known.add(asset.id)
+    if (gone.has(asset.id)) continue
+    assets.push(changed.get(asset.id) ?? asset)
+  }
+  const added = delta.upserts.filter((asset) => !known.has(asset.id) && !gone.has(asset.id))
+  return {
+    ...base,
+    updatedAt: delta.updatedAt || base.updatedAt,
+    roots: delta.roots,
+    tags: delta.tags,
+    assets: added.length > 0 ? [...added, ...assets] : assets
+  }
 }

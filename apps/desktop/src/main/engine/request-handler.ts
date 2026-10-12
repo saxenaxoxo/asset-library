@@ -185,6 +185,9 @@ export class RequestHandler {
             : "The thumbnail cache was already empty. They'll be made again in the background."
         ]
       }
+      case 'play-audio':
+      case 'stop-audio':
+        return [false, "Previewing sound from the panel isn't available in this version yet."]
     }
   }
 

@@ -40,6 +40,9 @@ export type PanelRequest =
   | { type: 'set-settings'; startAtLogin?: boolean }
   /** Delete generated thumbnails and previews; they're rebuilt in the background. */
   | { type: 'clear-cache' }
+  /** Play an asset's sound through the computer (panels can't play media). */
+  | { type: 'play-audio'; id: string }
+  | { type: 'stop-audio' }
 
 export interface RequestResult {
   /** The request file's name without ".json". */
@@ -68,6 +71,8 @@ export interface EngineStatus {
    * catalog only when this changes. Older engines omit it.
    */
   catalogUpdatedAt?: number
+  /** The full catalog's generation and the delta's seq, so the panel reads only what changed. */
+  catalog?: { generation: string; deltaSeq: number }
 }
 
 const ASSET_ID = /^[0-9a-f-]{36}$/
@@ -130,6 +135,10 @@ export function parseRequest(text: string): PanelRequest | null {
     }
     case 'clear-cache':
       return { type: 'clear-cache' }
+    case 'play-audio':
+      return isId(r['id']) ? { type: 'play-audio', id: r['id'] } : null
+    case 'stop-audio':
+      return { type: 'stop-audio' }
     default:
       return null
   }
@@ -151,6 +160,11 @@ export function parseEngineStatus(text: string): EngineStatus | null {
       results: Array.isArray(data.results) ? data.results : [],
       ...(typeof data.catalogUpdatedAt === 'number'
         ? { catalogUpdatedAt: data.catalogUpdatedAt }
+        : {}),
+      ...(data.catalog &&
+      typeof data.catalog.generation === 'string' &&
+      typeof data.catalog.deltaSeq === 'number'
+        ? { catalog: { generation: data.catalog.generation, deltaSeq: data.catalog.deltaSeq } }
         : {})
     }
   } catch {

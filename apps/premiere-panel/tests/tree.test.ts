@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { Catalog, CatalogAsset } from '@catalog/types'
+import {
+  applyCatalogDelta,
+  parseCatalogDelta,
+  type Catalog,
+  type CatalogAsset,
+  type CatalogDelta
+} from '@catalog/types'
 import {
   ALL_KEY,
   buildFolderTree,
@@ -170,5 +176,35 @@ describe('panel requests', () => {
     expect(requestId(1, 0.1)).not.toBe(requestId(1, 0.2))
     expect(numberedName('Whoosh.wav', 2)).toBe('Whoosh 2.wav')
     expect(numberedName('README', 3)).toBe('README 3')
+  })
+})
+
+describe('catalog deltas', () => {
+  const base: Catalog = { ...catalog, generation: 'g1', assets: [asset('a', 'X'), asset('b', 'X')] }
+
+  it('applies changes, additions and removals to the full catalog', () => {
+    const delta: CatalogDelta = {
+      generation: 'g1',
+      seq: 3,
+      updatedAt: 99,
+      roots: catalog.roots,
+      tags: ['new'],
+      upserts: [asset('b', 'X', { favorite: true }), asset('c', 'Y')],
+      removes: ['a']
+    }
+    const next = applyCatalogDelta(base, delta)
+    expect(next.assets.map((a) => a.id)).toEqual(['c', 'b'])
+    expect(next.assets.find((a) => a.id === 'b')?.favorite).toBe(true)
+    expect(next.tags).toEqual(['new'])
+    expect(next.updatedAt).toBe(99)
+    expect(base.assets).toHaveLength(2) // the full catalog itself is untouched
+  })
+
+  it('ignores a delta for another generation', () => {
+    const delta = parseCatalogDelta(
+      JSON.stringify({ generation: 'g0', seq: 1, roots: [], tags: [], upserts: [], removes: ['a'] })
+    )!
+    expect(applyCatalogDelta(base, delta)).toBe(base)
+    expect(parseCatalogDelta('{"generation":1}')).toBeNull()
   })
 })
