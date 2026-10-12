@@ -194,21 +194,13 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await page.locator('.star-toggle').click()
   await expect(tiles).toHaveCount(3)
 
-  // The size slider changes the thumbnails.
+  // The size menu changes the thumbnails.
   const widthBefore = await tiles.first().evaluate((n) => (n as HTMLElement).offsetWidth)
-  await page.locator('.size-slider').evaluate((n) => {
-    const slider = n as HTMLInputElement
-    slider.value = '220'
-    slider.dispatchEvent(new Event('input'))
-  })
+  await page.selectOption('.size-select', '220')
   await expect
     .poll(() => tiles.first().evaluate((n) => (n as HTMLElement).offsetWidth))
     .not.toBe(widthBefore)
-  await page.locator('.size-slider').evaluate((n) => {
-    const slider = n as HTMLInputElement
-    slider.value = '120'
-    slider.dispatchEvent(new Event('input'))
-  })
+  await page.selectOption('.size-select', '120')
 
   // No selection preview: the selected tile is highlighted, nothing else.
   await expect(page.locator('.preview')).toHaveCount(0)

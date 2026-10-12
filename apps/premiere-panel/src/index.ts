@@ -47,12 +47,29 @@ import { installDiagnostics, note } from './diag'
 declare const PANEL_DIAG: boolean
 
 const uxp = require('uxp')
+/** Whether this Premiere is known to take drags from a panel; the drag is wired regardless. */
 const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
 const WINDOWS = detectWindows()
-const PANEL_VERSION = '0.3.22'
+const PANEL_VERSION = '0.3.24'
 
 const TILE_SIZES = { min: 80, max: 240, default: 120 }
+const TILE_SIZE_CHOICES: [number, string][] = [
+  [88, 'S'],
+  [120, 'M'],
+  [160, 'L'],
+  [220, 'XL']
+]
+
+/** The size menu entry closest to a saved size (older panels saved any slider value). */
+function nearestTileSize(size: number): number {
+  let best = TILE_SIZES.default
+  for (const [value] of TILE_SIZE_CHOICES)
+    if (Math.abs(value - size) < Math.abs(best - size)) best = value
+  return best
+}
 const TREE_ROW = 26
+/** Width a scrollbar takes beside the tree rows, when the host can't be asked. */
+const SCROLLBAR_PX = 16
 const GAP = 8
 const CAPTION = 34
 const POLL_MS = 3000
@@ -292,15 +309,17 @@ for (const [value, label] of [
   option.value = value
   typeSelect.append(option)
 }
-const sizeSlider = el('input', 'size-slider')
-sizeSlider.type = 'range'
-sizeSlider.min = String(TILE_SIZES.min)
-sizeSlider.max = String(TILE_SIZES.max)
-sizeSlider.step = '4'
-sizeSlider.value = String(state.tileSize)
-sizeSlider.title = 'Thumbnail size'
-sizeSlider.setAttribute('aria-label', 'Thumbnail size')
-toolbar.append(treeToggle, upButton, folderSelect, typeSelect, importButton, sizeSlider)
+// Thumbnail size: a menu rather than a slider, which the panel runtime can't size reliably.
+const sizeSelect = el('select', 'size-select')
+sizeSelect.title = 'Thumbnail size'
+sizeSelect.setAttribute('aria-label', 'Thumbnail size')
+for (const [value, label] of TILE_SIZE_CHOICES) {
+  const option = el('option', '', label)
+  option.value = String(value)
+  sizeSelect.append(option)
+}
+sizeSelect.value = String(nearestTileSize(state.tileSize))
+toolbar.append(treeToggle, upButton, folderSelect, typeSelect, importButton, sizeSelect)
 const addFolderButton = el('div', 'button small', '+ Folder')
 addFolderButton.title = 'Add a folder to your library'
 treeHead.append(el('span', 'tree-title', 'Library'), addFolderButton)
@@ -919,7 +938,6 @@ function buildTile(asset: CatalogAsset, box: Layout): TileNode {
 
 /** Drag onto Premiere's timeline (Premiere 27+ only). */
 function makeDraggable(node: HTMLElement, asset: CatalogAsset): void {
-  if (!canDrag) return
   const contentType = dragContentType(asset.name)
   if (!contentType) return
   node.setAttribute('draggable', 'true')
@@ -1456,7 +1474,8 @@ function renderTree(rebuild = true): void {
     treeCache.length - 1,
     Math.ceil((scrolled + (treeScroll.clientHeight || 600)) / TREE_ROW) + 6
   )
-  const width = Math.max(120, (treeScroll.clientWidth || treeWidth()) - 2)
+  // The host may not report the pane's inner width; leave room for its scrollbar then.
+  const width = Math.max(120, (treeScroll.clientWidth || treeWidth() - SCROLLBAR_PX) - 2)
   setStyle(treeSpacer, 'height', `${treeCache.length * TREE_ROW}px`)
   setStyle(treeSpacer, 'width', `${width}px`)
   const shown = new Set<string>()
@@ -1850,6 +1869,15 @@ function selected(): CatalogAsset | null {
   return state.visible.find((asset) => asset.id === state.selectedId) ?? null
 }
 
+/** Keyboard focus to the grid, where the host allows it (a panel runtime may refuse or throw). */
+function focusGrid(): void {
+  try {
+    grid.focus()
+  } catch {
+    // keys stay where they were
+  }
+}
+
 /** Every selected asset, in the grid's order. */
 function selectedAssets(): CatalogAsset[] {
   return state.visible.filter((asset) => state.selectedIds.has(asset.id))
@@ -1872,7 +1900,7 @@ function select(asset: CatalogAsset, event?: { shiftKey: boolean; metaKey: boole
   }
   state.selectedId = asset.id
   state.status = null
-  grid.focus()
+  focusGrid()
   renderGrid()
   renderTree(false)
   renderFooter()
@@ -2088,8 +2116,8 @@ favoritesToggle.addEventListener('click', () => {
   state.favoritesOnly = !state.favoritesOnly
   applyFilter(true)
 })
-sizeSlider.addEventListener('input', () => {
-  state.tileSize = Number(sizeSlider.value) || TILE_SIZES.default
+sizeSelect.addEventListener('change', () => {
+  state.tileSize = Number(sizeSelect.value) || TILE_SIZES.default
   save(KEYS.tileSize, state.tileSize)
   renderGrid()
 })
@@ -2136,7 +2164,7 @@ document.addEventListener('keydown', (event) => {
   if (event.repeat) return
   if (event.key === 'Escape' && document.activeElement === search) {
     clearSearch()
-    grid.focus()
+    focusGrid()
     return
   }
   // Keys in a field, menu or button belong to that control.
