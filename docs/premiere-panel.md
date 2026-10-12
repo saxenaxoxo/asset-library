@@ -35,6 +35,10 @@ from UXP panels only from 27.0). Everything else works the same in both.
    Premiere Pro below 27 is installed and the UXP build where 27 or later is, so nobody gets two panels.
 4. Restart Premiere Pro and open **Window → Extensions → Asset Library**.
 
+The Premiere side of the CEP build is `cep/host.jsx`, ExtendScript (ES3) with a semicolon after every
+statement: Premiere's engine stops at the first statement without one, and the panel then only sees
+"EvalScript error." for everything. A unit test keeps the file formatted that way.
+
 ### UXP build (Premiere 27 and later)
 
 1. Build it: `pnpm -C apps/premiere-panel package` (creates `release/Asset-Library-Premiere-<version>.ccx`).
