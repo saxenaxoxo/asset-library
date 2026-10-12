@@ -21,6 +21,26 @@ export function panelNameFor(kind: PanelKind, productName: string): string {
   return kind === 'cep' ? `${productName} CEP` : productName
 }
 
+/** Premiere reads drags from UXP panels from this version; before it, the CEP build is the one. */
+const UXP_FROM_MAJOR = 27
+
+/** The Premiere Pro versions Adobe's installer knows about ("… installed for Premiere Pro (ver 26.5.2)"). */
+export function premiereVersions(listOutput: string): string[] {
+  return [...listOutput.matchAll(/installed for Premiere Pro \(ver (\d+(?:\.\d+)*)\)/g)].map(
+    (match) => match[1] as string
+  )
+}
+
+/** Which panel builds the installed Premiere versions need: CEP below 27, UXP from 27. */
+export function wantedKinds(versions: readonly string[]): Set<PanelKind> {
+  const kinds = new Set<PanelKind>()
+  for (const version of versions) {
+    const major = Number.parseInt(version, 10) || 0
+    kinds.add(major >= UXP_FROM_MAJOR ? 'uxp' : 'cep')
+  }
+  return kinds
+}
+
 /** Where Adobe's installer lives, or null on platforms without one. */
 export function upiaPath(
   platform: NodeJS.Platform,
@@ -75,12 +95,13 @@ const VERSION = '\\d+(?:\\.\\d+){1,3}'
 export function installedPanelVersions(listOutput: string, name: string): string[] {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const named = new RegExp(`(?:^|\\s)${escaped}\\s+(${VERSION})(?:\\s|$)`, 'i')
-  const versions: string[] = []
+  // One copy serves every Premiere Pro version on the machine, so each version counts once.
+  const versions = new Set<string>()
   for (const line of listOutput.split(/\r?\n/)) {
     const version = named.exec(line)?.[1]
-    if (version) versions.push(version)
+    if (version) versions.add(version)
   }
-  return versions
+  return [...versions]
 }
 
 /**
@@ -196,13 +217,19 @@ export class PanelInstaller {
     return path && this.deps.exists(path) ? path : null
   }
 
-  /** Installed versions of each panel kind, or null when Adobe's installer isn't there. */
-  async installedVersions(): Promise<Record<PanelKind, string[]> | null> {
+  /**
+   * What Adobe's installer reports: the Premiere Pro versions on this machine and the installed
+   * versions of each panel kind. Null when the installer itself isn't there.
+   */
+  async installedVersions(): Promise<
+    (Record<PanelKind, string[]> & { premiere: string[] }) | null
+  > {
     const agent = this.agent()
     if (!agent) return null
     const listed = await this.deps.run(agent, upiaArgs(this.deps.platform, { action: 'list' }))
     const { panelName } = this.deps
     return {
+      premiere: premiereVersions(listed.output),
       cep: installedPanelVersions(listed.output, panelNameFor('cep', panelName)),
       uxp: installedPanelVersions(listed.output, panelNameFor('uxp', panelName))
     }
@@ -231,11 +258,26 @@ export class PanelInstaller {
     }
     const { platform } = this.deps
     try {
-      for (const bundle of bundles) {
+      const found = await this.installedVersions()
+      const premiere = found?.premiere ?? []
+      if (premiere.length === 0) {
+        return {
+          ok: false,
+          message: "Premiere Pro isn't installed on this computer, so there's nowhere to put the panel."
+        }
+      }
+      const wanted = wantedKinds(premiere)
+      const needed = bundles.filter((bundle) => wanted.has(bundle.kind))
+      if (needed.length === 0) {
+        return {
+          ok: false,
+          message: `This copy of the app has no panel for Premiere Pro ${premiere.join(', ')}.`
+        }
+      }
+      for (const bundle of needed) {
         // Adobe's installer keeps old versions beside new ones (and Premiere may load an old
         // one), so every installed copy of this kind is removed first.
-        const before = await this.installedVersions()
-        const removals = Math.min(Math.max(before?.[bundle.kind].length ?? 0, 1), MAX_REMOVALS)
+        const removals = Math.min(Math.max(found?.[bundle.kind].length ?? 0, 1), MAX_REMOVALS)
         for (let i = 0; i < removals; i++) {
           await this.deps.run(
             agent,
@@ -260,7 +302,7 @@ export class PanelInstaller {
           }
         }
       }
-      const version = bundles[0]?.version ?? ''
+      const version = needed[0]?.version ?? ''
       return {
         ok: true,
         version,
@@ -289,10 +331,12 @@ export class PanelInstaller {
     const version = bundles.map((b) => `${b.kind}:${b.version}`).join(' ')
     if (bundles.length === 0 || lastTried === version) return null
     const installed = await this.installedVersions()
-    // No Adobe installer yet (Premiere not installed): try again at a later launch.
-    if (installed === null) return null
+    // No Adobe installer, or no Premiere Pro yet: try again at a later launch.
+    if (installed === null || installed.premiere.length === 0) return null
     recordTry(version)
-    if (!bundles.some((b) => panelNeedsInstall(b.version, installed[b.kind]))) return null
+    const wanted = wantedKinds(installed.premiere)
+    const needed = bundles.filter((b) => wanted.has(b.kind))
+    if (!needed.some((b) => panelNeedsInstall(b.version, installed[b.kind]))) return null
     return this.install()
   }
 }

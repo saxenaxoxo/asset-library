@@ -3,6 +3,8 @@ import nodePath from 'path'
 import {
   bundledPanelFiles,
   compareVersions,
+  premiereVersions,
+  wantedKinds,
   installedPanelVersions,
   installSucceeded,
   PanelInstaller,
@@ -19,14 +21,26 @@ const MAC_UPIA =
 
 // Output shaped like Adobe's installer prints it: the UXP build under the product name, the CEP
 // build under "<product> CEP".
-const list = (versions: string[], cepVersions: string[] = []): string =>
+const list = (
+  versions: string[],
+  cepVersions: string[] = [],
+  premiere: string[] = ['27.0.0']
+): string =>
   [
-    `${versions.length + cepVersions.length} extension(s) installed for Premiere Pro (ver 26.0.0)`,
-    '        Status        Extension ID                       Version',
-    '  =================================================================',
-    ...versions.map((v) => `        Enabled       Asset Library                      ${v}`),
-    ...cepVersions.map((v) => `        Enabled       Asset Library CEP                  ${v}`),
-    '        Enabled       Some Other Panel                   9.9.9'
+    '0 extension installed for Adobe Media Encoder (ver 26.5.2)',
+    ' Status                        Extension Name                         Version',
+    '=========  =======================================================  ==========',
+    '',
+    ...premiere.flatMap((host) => [
+      `${versions.length + cepVersions.length} extensions installed for Premiere Pro (ver ${host})`,
+      ' Status                        Extension Name                         Version',
+      '=========  =======================================================  ==========',
+      ...versions.map((v) => ` Enabled    Asset Library                                               ${v}`),
+      ...cepVersions.map((v) => ` Enabled    Asset Library CEP                                           ${v}`),
+      ' Enabled    Some Other Panel                                             9.9.9',
+      ''
+    ]),
+    '0 extension installed for Others'
   ].join('\n')
 
 describe('Adobe installer paths and arguments', () => {
@@ -82,6 +96,15 @@ describe('reading the installer output', () => {
     expect(installedPanelVersions(list(['1.0.0']), 'Asset Lib')).toEqual([])
   })
 
+  it('reads the Premiere Pro versions and which panel build each needs', () => {
+    expect(premiereVersions(list([], [], ['26.5.2', '27.0.0']))).toEqual(['26.5.2', '27.0.0'])
+    expect(premiereVersions('0 extension installed for Others')).toEqual([])
+    expect([...wantedKinds(['26.5.2'])]).toEqual(['cep'])
+    expect([...wantedKinds(['27.0.0'])]).toEqual(['uxp'])
+    expect([...wantedKinds(['25.6.0', '27.1.0'])]).toEqual(['cep', 'uxp'])
+    expect([...wantedKinds([])]).toEqual([])
+  })
+
   it('says why it failed in one line', () => {
     expect(upiaProblem('Installing...\n\nFailed to install, status = -251\n')).toBe(
       'Failed to install, status = -251'
@@ -132,6 +155,7 @@ function installer(
     bundled?: string[] | null
     installOutput?: string
     platform?: NodeJS.Platform
+    premiere?: string[]
   } = {}
 ): {
   installer: PanelInstaller
@@ -145,7 +169,8 @@ function installer(
   const run = vi.fn(async (_file: string, args: string[]): Promise<UpiaRun> => {
     calls.push(args)
     const [flag, value] = args
-    if (flag?.endsWith('list')) return { ok: true, output: list(installed, installedCep) }
+    if (flag?.endsWith('list'))
+      return { ok: true, output: list(installed, installedCep, options.premiere) }
     if (flag?.endsWith('remove')) {
       ;(value === 'Asset Library CEP' ? installedCep : installed).shift()
       return { ok: true, output: 'Removal Successful' }
@@ -246,11 +271,27 @@ describe('PanelInstaller', () => {
     expect(record).not.toHaveBeenCalled()
   })
 
-  it('installs the CEP build and the UXP build, each under its own name', async () => {
+  it('installs the build each installed Premiere Pro needs: CEP below 27, UXP from 27', async () => {
+    const both = ['Asset-Library-Premiere-0.4.0.ccx', 'Asset-Library-Premiere-CEP-0.4.0.zxp']
+    // Only Premiere 26: the CEP build, nothing else.
+    const cepOnly = installer({ bundled: both, installed: ['0.3.24'], premiere: ['26.5.2'] })
+    expect(await cepOnly.installer.install()).toMatchObject({ ok: true, version: '0.4.0' })
+    expect(cepOnly.calls.filter(([flag]) => flag === '--install').map(([, f]) => f)).toEqual([
+      nodePath.join('/App/resources', 'premiere-panel', 'Asset-Library-Premiere-CEP-0.4.0.zxp')
+    ])
+    expect(cepOnly.installedCep).toEqual(['0.4.0'])
+    // No Premiere at all: nothing to do, and nothing remembered.
+    const none = installer({ bundled: both, premiere: [] })
+    expect((await none.installer.install()).message).toMatch(/isn't installed/)
+    const record = vi.fn()
+    expect(await none.installer.installIfNeeded(null, record)).toBeNull()
+    expect(record).not.toHaveBeenCalled()
+    // Premiere 26 and 27 side by side: both builds, each under its own name.
     const { installer: i, calls, installed, installedCep } = installer({
-      bundled: ['Asset-Library-Premiere-0.4.0.ccx', 'Asset-Library-Premiere-CEP-0.4.0.zxp'],
+      bundled: both,
       installed: ['0.3.24'],
-      installedCep: []
+      installedCep: [],
+      premiere: ['26.5.2', '27.0.0']
     })
     expect(await i.install()).toMatchObject({ ok: true, version: '0.4.0' })
     expect(calls.filter(([flag]) => flag === '--remove')).toEqual([
@@ -264,11 +305,7 @@ describe('PanelInstaller', () => {
     expect(installed).toEqual(['0.4.0'])
     expect(installedCep).toEqual(['0.4.0'])
     // A build whose CEP panel is missing from Premiere installs by itself, too.
-    const record = vi.fn()
-    const partial = installer({
-      bundled: ['Asset-Library-Premiere-0.4.0.ccx', 'Asset-Library-Premiere-CEP-0.4.0.zxp'],
-      installed: ['0.4.0']
-    })
+    const partial = installer({ bundled: both, installed: ['0.4.0'], premiere: ['26.5.2', '27.0.0'] })
     expect(await partial.installer.installIfNeeded(null, record)).toMatchObject({ ok: true })
     expect(record).toHaveBeenLastCalledWith('cep:0.4.0 uxp:0.4.0')
   })
