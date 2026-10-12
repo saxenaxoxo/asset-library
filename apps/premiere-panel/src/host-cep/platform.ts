@@ -78,7 +78,7 @@ export const capabilities = {
 }
 
 /** Only web pages and the engine's start link ever leave the panel; nothing else is opened. */
-function allowedLink(url: string): boolean {
+export function allowedLink(url: string): boolean {
   if (url === ENGINE_START_URL) return true
   try {
     return new URL(url).protocol === 'https:'

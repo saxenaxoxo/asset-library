@@ -16,7 +16,7 @@ interface Reply {
  * U+2028/U+2029 and has trouble with non-ASCII in scripts, so every such character is written
  * as \uXXXX. File names from a downloaded pack can never turn into code this way.
  */
-function literal(value: unknown): string {
+export function literal(value: unknown): string {
   return JSON.stringify(value).replace(
     /[\u007f-\uffff]/g,
     (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`

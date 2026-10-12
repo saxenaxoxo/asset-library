@@ -12,11 +12,11 @@
   },
   "include": [
     "src/**/*",
+    "tests/cep-host.test.ts",
     "../../packages/catalog/**/*"
   ],
   "exclude": [
     "src/host-uxp/**",
-    "src/diag.ts",
-    "tests/**"
+    "src/diag.ts"
   ]
 }

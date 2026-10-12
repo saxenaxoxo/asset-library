@@ -1,0 +1,41 @@
+// Signs the CEP build into a .zxp that Premiere accepts without developer flags, using Adobe's
+// ZXPSignCmd (not bundled: put it at tools/ZXPSignCmd or point ZXPSIGNCMD at it). A self-signed
+// certificate is created once at tools/asset-library-cep.p12; the password comes from
+// ZXP_CERT_PASSWORD (default: a local development password, fine for a self-signed certificate).
+//
+//   node scripts/sign-cep.mjs            → release/Asset-Library-Premiere-CEP-<version>.zxp
+import { execFileSync } from 'node:child_process'
+import { access, mkdir, readFile, rm } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const dist = join(root, 'dist-cep')
+const tools = join(root, 'tools')
+const signer = process.env.ZXPSIGNCMD ?? join(tools, 'ZXPSignCmd')
+const certificate = join(tools, 'asset-library-cep.p12')
+const password = process.env.ZXP_CERT_PASSWORD ?? 'asset-library-dev'
+const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+
+const exists = (path) => access(path).then(() => true, () => false)
+if (!(await exists(signer))) {
+  console.error(`ZXPSignCmd not found at ${signer}. Download it from Adobe's CEP-Resources and put it there.`)
+  process.exit(1)
+}
+if (!(await exists(dist))) {
+  console.error('No dist-cep/. Run "pnpm build:cep" first.')
+  process.exit(1)
+}
+await mkdir(tools, { recursive: true })
+if (!(await exists(certificate))) {
+  execFileSync(signer, [
+    '-selfSignedCert', 'IN', 'Delhi', 'Saxenas Creation', 'Asset Library', password, certificate
+  ], { stdio: 'inherit' })
+}
+const out = join(root, 'release', `Asset-Library-Premiere-CEP-${version}.zxp`)
+await mkdir(dirname(out), { recursive: true })
+await rm(out, { force: true })
+execFileSync(signer, ['-sign', dist, out, certificate, password, '-tsa', 'http://timestamp.digicert.com'], {
+  stdio: 'inherit'
+})
+console.log(`Wrote ${out}`)

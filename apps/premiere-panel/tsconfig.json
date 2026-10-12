@@ -30,6 +30,7 @@
   ],
   "exclude": [
     "src/host-cep/**",
+    "tests/cep-host.test.ts",
     "tests/harness/**",
     "tests/*.harness.spec.ts"
   ]

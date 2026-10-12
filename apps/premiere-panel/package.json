@@ -12,7 +12,8 @@
     "test": "vitest run",
     "package": "node scripts/build.mjs && node scripts/package.mjs",
     "package:cep": "node scripts/build.mjs --cep && node scripts/package.mjs --cep",
-    "test:harness": "node scripts/build.mjs && node scripts/build.mjs --cep && playwright test"
+    "test:harness": "node scripts/build.mjs && node scripts/build.mjs --cep && playwright test",
+    "sign:cep": "node scripts/build.mjs --cep && node scripts/sign-cep.mjs"
   },
   "devDependencies": {
     "@adobe/premierepro": "26.5.1",
