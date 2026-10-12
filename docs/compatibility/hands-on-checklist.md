@@ -20,12 +20,15 @@ Record ✅ / ❌ (with what happened) next to each line, and copy results into `
 - [ ] Drag each onto the **timeline** (with a sequence open).
 - [ ] The same into After Effects (Project panel and a comp).
 - [ ] Select several and drag them at once (Settings → Drag-out test → Drag all).
+- [ ] Drag from the **installed** app too (not only `pnpm dev`): the drag icon appears and the drop works.
 
 ## 3. Premiere Pro panel (15 min) — see `docs/premiere-panel.md` to install
 
 - [ ] Panel opens and shows your library (or offers **Choose catalog…**).
 - [ ] Thumbnails show. _(If they're blank, note it: UXP image loading is the biggest unknown.)_
 - [ ] Hover-scrub works on videos; selected item preview plays.
+- [ ] Scroll down the grid and wait while the desktop app is still indexing: the grid stays where you scrolled.
+- [ ] Select an audio file: its preview stays silent until you click it.
 - [ ] **Add at playhead** with V2/A2 + Overwrite: clip lands at the playhead on V2/A2, inside an
       **Asset Library** bin. Undo (Cmd+Z) removes it in one step.
 - [ ] Insert mode pushes later clips right.
@@ -35,6 +38,8 @@ Record ✅ / ❌ (with what happened) next to each line, and copy results into `
 - [ ] A `.mogrt` (if you have one) is placed at the playhead.
 - [ ] Adding while no sequence is open shows "Open a sequence, then try again."
 - [ ] Add a folder in the desktop app → the panel updates within a few seconds.
+- [ ] The panel's icon shows in Premiere's Window → UXP Plugins menu and in the panel tab.
+- [ ] A file with `#` or `%` in its name (e.g. `Glitch #2.mov`) adds correctly.
 
 ## 4. After Effects 26.5 (10 min) — from the desktop app's details panel
 
@@ -46,6 +51,7 @@ Record ✅ / ❌ (with what happened) next to each line, and copy results into `
 - [ ] A ProRes 4444 overlay keeps its transparency.
 - [ ] An `.ffx` preset applies to the selected layers ("Apply to selected layers in After Effects").
 - [ ] An `.aep` imports as a project.
+- [ ] A file with `%` in its name (e.g. `50% Grain.mov`) imports correctly.
 
 ## 5. Installers (5 min)
 
