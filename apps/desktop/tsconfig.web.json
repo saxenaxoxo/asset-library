@@ -4,7 +4,8 @@
     "src/renderer/src/**/*",
     "src/shared/**/*",
     "src/preload/*.d.ts",
-    "../../packages/branding/**/*"
+    "../../packages/branding/**/*",
+    "../../packages/catalog/**/*"
   ],
   "compilerOptions": {
     "composite": true,
@@ -15,7 +16,8 @@
     "paths": {
       "@renderer/*": ["src/renderer/src/*"],
       "@shared/*": ["src/shared/*"],
-      "@brand/*": ["../../packages/branding/*"]
+      "@brand/*": ["../../packages/branding/*"],
+      "@catalog/*": ["../../packages/catalog/*"]
     }
   }
 }

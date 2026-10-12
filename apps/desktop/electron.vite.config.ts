@@ -5,7 +5,8 @@ import tailwindcss from '@tailwindcss/vite'
 
 const alias = {
   '@shared': resolve('src/shared'),
-  '@brand': resolve('../../packages/branding')
+  '@brand': resolve('../../packages/branding'),
+  '@catalog': resolve('../../packages/catalog')
 }
 
 export default defineConfig({

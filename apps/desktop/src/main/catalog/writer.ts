@@ -1,41 +1,9 @@
 import { mkdir, rename, writeFile } from 'fs/promises'
 import { join } from 'path'
 import type { LibraryRepository } from '../library/repository'
+import { CATALOG_VERSION, type Catalog, type CatalogAsset } from '@catalog/types'
 
-/** Version of the catalog format shared with the Premiere Pro panel. Bump on breaking changes. */
-export const CATALOG_VERSION = 1
-
-export interface CatalogAsset {
-  id: string
-  name: string
-  kind: 'video' | 'audio' | 'image' | 'template'
-  /** Absolute path of the original file: what gets imported into Premiere. */
-  path: string
-  folder: string
-  root: string
-  durationMs: number | null
-  width: number | null
-  height: number | null
-  fps: number | null
-  hasAlpha: boolean | null
-  favorite: boolean
-  tags: string[]
-  addedAt: number
-  /** Absolute paths of generated media in the cache, or null. */
-  thumb: string | null
-  sprite: string | null
-  preview: string | null
-  wave: string | null
-}
-
-export interface Catalog {
-  version: number
-  updatedAt: number
-  app: string
-  roots: { id: number; label: string; online: boolean }[]
-  tags: string[]
-  assets: CatalogAsset[]
-}
+export { CATALOG_VERSION } from '@catalog/types'
 
 /** Builds the catalog that the Premiere panel reads. Offline and missing assets are left out. */
 export function buildCatalog(

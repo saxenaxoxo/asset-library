@@ -14,7 +14,10 @@
     "format": "prettier --write .",
     "icons": "pnpm --filter asset-library icons",
     "dist:mac": "pnpm --filter asset-library dist:mac",
-    "dist:win": "pnpm --filter asset-library dist:win"
+    "dist:win": "pnpm --filter asset-library dist:win",
+    "panel:build": "pnpm --filter asset-library-premiere-panel build",
+    "panel:watch": "pnpm --filter asset-library-premiere-panel watch",
+    "panel:package": "pnpm --filter asset-library-premiere-panel package"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",

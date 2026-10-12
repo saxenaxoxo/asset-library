@@ -12,6 +12,7 @@ export default defineConfig(
       '**/dist',
       '**/out',
       '**/test-results',
+      '**/release',
       '**/resources/**',
       '.cache/**'
     ]
@@ -30,6 +31,11 @@ export default defineConfig(
       ...eslintPluginReactHooks.configs.recommended.rules,
       ...eslintPluginReactRefresh.configs.vite.rules
     }
+  },
+  {
+    // UXP provides host modules (premierepro, uxp, fs) only through require().
+    files: ['apps/premiere-panel/src/**/*.ts'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' }
   },
   eslintConfigPrettier
 )

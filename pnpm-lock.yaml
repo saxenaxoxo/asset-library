@@ -106,7 +106,32 @@ importers:
         specifier: ^4.0.10
         version: 4.1.11(@types/node@24.19.2)(vite@7.3.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0))
 
+  apps/premiere-panel:
+    devDependencies:
+      '@adobe/premierepro':
+        specifier: 26.5.1
+        version: 26.5.1
+      '@playwright/test':
+        specifier: ^1.64.0
+        version: 1.64.0
+      electron:
+        specifier: 44.7.0
+        version: 44.7.0
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.10
+        version: 4.1.11(@types/node@24.19.2)(vite@7.3.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0))
+
 packages:
+
+  '@adobe/premierepro@26.5.1':
+    resolution: {integrity: sha512-rNnePE5VZnEc8n2gUPE/m9jd1h4zhrxeD3tIEc156lI5/S59EG0AwrwixCuS4UxmoFq6HGwaWb8AIJLyAxs4UA==}
+    engines: {node: '>=20.0.0'}
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -3196,6 +3221,8 @@ packages:
 
 snapshots:
 
+  '@adobe/premierepro@26.5.1': {}
+
   '@babel/code-frame@7.29.7':
     dependencies:
       '@babel/helper-validator-identifier': 7.29.7
@@ -5173,7 +5200,7 @@ snapshots:
       es6-error: 4.1.1
       matcher: 3.0.0
       roarr: 2.15.4
-      semver: 7.7.4
+      semver: 7.8.5
       serialize-error: 7.0.1
     optional: true
 
@@ -5607,13 +5634,13 @@ snapshots:
 
   node-abi@4.37.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-addon-api@8.9.2: {}
 
   node-api-version@0.2.1:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-exports-info@1.6.2:
     dependencies:
@@ -5629,7 +5656,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.5
       tar: 7.5.22
       tinyglobby: 0.2.17
       undici: 6.29.0

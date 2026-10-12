@@ -1,0 +1,23 @@
+{
+  "name": "asset-library-premiere-panel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Asset Library panel for Adobe Premiere Pro (UXP).",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "node scripts/build.mjs && node scripts/package.mjs",
+    "test:harness": "node scripts/build.mjs && playwright test"
+  },
+  "devDependencies": {
+    "@adobe/premierepro": "26.5.1",
+    "@playwright/test": "^1.64.0",
+    "electron": "44.7.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.10"
+  }
+}
