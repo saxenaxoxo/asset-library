@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import type { Dir } from 'fs'
 import { open, opendir, stat } from 'fs/promises'
 import { join, relative, sep } from 'path'
 import { kindForFile } from '@shared/media-types'
@@ -54,6 +55,15 @@ export interface ScanOptions {
 
 export class RootUnavailableError extends Error {}
 
+export interface ScanResult {
+  filesSeen: number
+  /**
+   * False when part of the tree couldn't be listed or the scan was stopped early. An incomplete
+   * scan must never mark unseen files as missing.
+   */
+  complete: boolean
+}
+
 /** Normalizes a path relative to the root to forward slashes, the format stored in the DB. */
 export function toRelPath(rootPath: string, fullPath: string): string {
   return relative(rootPath, fullPath).split(sep).join('/')
@@ -69,7 +79,7 @@ export function isExcluded(relPath: string, exclusions: readonly string[]): bool
  * itself can't be read (drive unplugged, folder renamed), so the caller can mark it offline
  * instead of concluding that every file vanished.
  */
-export async function scanRoot(options: ScanOptions): Promise<number> {
+export async function scanRoot(options: ScanOptions): Promise<ScanResult> {
   const { rootPath, exclusions, known, onBatch } = options
   const batchSize = options.batchSize ?? 250
   try {
@@ -81,6 +91,7 @@ export async function scanRoot(options: ScanOptions): Promise<number> {
 
   let batch: ScanEntry[] = []
   let seen = 0
+  let complete = true
   const flush = (): void => {
     if (batch.length === 0) return
     onBatch(batch)
@@ -89,7 +100,10 @@ export async function scanRoot(options: ScanOptions): Promise<number> {
 
   const pending: string[] = [rootPath]
   while (pending.length > 0) {
-    if (options.shouldStop?.()) break
+    if (options.shouldStop?.()) {
+      complete = false
+      break
+    }
     const dirPath = pending.pop() as string
     let dir
     try {
@@ -97,7 +111,29 @@ export async function scanRoot(options: ScanOptions): Promise<number> {
     } catch {
       continue // unreadable sub-folder: skip it, keep scanning the rest
     }
+    try {
+      await scanDirectory(dir, dirPath)
+    } catch {
+      // The folder became unreadable mid-listing (flaky drive, NAS hiccup): keep what we have.
+      // If the whole root vanished, the final check below reports it.
+      complete = false
+    }
+  }
+  flush()
+  // Re-check the root: if the drive vanished mid-scan, the results are incomplete.
+  try {
+    await stat(rootPath)
+  } catch (error) {
+    throw new RootUnavailableError(`Lost access to ${rootPath}: ${(error as Error).message}`)
+  }
+  return { filesSeen: seen, complete }
+
+  async function scanDirectory(dir: Dir, dirPath: string): Promise<void> {
     for await (const entry of dir) {
+      if (options.shouldStop?.()) {
+        complete = false
+        return
+      }
       if (entry.name.startsWith('.')) continue
       if (entry.isSymbolicLink()) continue
       const fullPath = join(dirPath, entry.name)
@@ -133,12 +169,4 @@ export async function scanRoot(options: ScanOptions): Promise<number> {
       if (batch.length >= batchSize) flush()
     }
   }
-  flush()
-  // Re-check the root: if the drive vanished mid-scan, the results are incomplete.
-  try {
-    await stat(rootPath)
-  } catch (error) {
-    throw new RootUnavailableError(`Lost access to ${rootPath}: ${(error as Error).message}`)
-  }
-  return seen
 }

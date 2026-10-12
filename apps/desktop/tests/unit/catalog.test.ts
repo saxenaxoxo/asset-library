@@ -28,8 +28,9 @@ describe('catalog', () => {
   it('lists available assets with absolute original paths and generated media', () => {
     const repo = library()
     const glow = repo.query({ text: 'glow' }).items[0]!
-    repo.saveMedia(glow.id, 'k', {
-      thumb: `${glow.id}-k.thumb.png`,
+    // The key must match the file's current content key ('a' is its fingerprint).
+    repo.saveMedia(glow.id, 'a', {
+      thumb: `${glow.id}-a.thumb.png`,
       sprite: null,
       preview: null,
       wave: null
@@ -46,7 +47,7 @@ describe('catalog', () => {
       folder: 'Overlays',
       root: 'Assets',
       favorite: true,
-      thumb: `/media/${glow.id}-k.thumb.png`,
+      thumb: `/media/${glow.id}-a.thumb.png`,
       preview: null
     })
   })

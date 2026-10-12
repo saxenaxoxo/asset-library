@@ -71,6 +71,12 @@ test('launches into the branded empty library', async () => {
   // Packaged builds must ship a working FFprobe (run in the utility process).
   if (executablePath) expect(diagnostics.ffprobeVersion).toMatch(/^\d+\.\d+/)
 
+  // Drag-out needs its icon on disk: macOS refuses to start a drag with an empty image.
+  const dragIconEmpty = await app.evaluate(({ app: electronApp, nativeImage }) =>
+    nativeImage.createFromPath(`${electronApp.getAppPath()}/resources/drag-icon.png`).isEmpty()
+  )
+  expect(dragIconEmpty).toBe(false)
+
   await page.waitForTimeout(800) // let the one-time shelf animation settle
   await page.screenshot({ path: 'test-results/shell.png' })
   await app.close()

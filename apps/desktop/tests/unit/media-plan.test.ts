@@ -70,4 +70,15 @@ describe('mediaPlan', () => {
     const args = mediaPlan({ ...base, width: 1081, height: 1921 })[2]!.args.join(' ')
     expect(args).toMatch(/scale=(\d*[02468]):(\d*[02468])/)
   })
+
+  it('seeks to each scrub frame on long clips instead of decoding the whole file', () => {
+    const sprite = mediaPlan({ ...base, durationMs: 3_600_000 }).find((j) => j.output === 'sprite')!
+    const seeks = sprite.args.filter((_, i) => sprite.args[i - 1] === '-ss')
+    expect(seeks).toHaveLength(10)
+    expect(Number(seeks[0])).toBeCloseTo(180)
+    expect(Number(seeks[9])).toBeCloseTo(3420)
+    expect(sprite.args.filter((arg) => arg === base.input)).toHaveLength(10)
+    expect(sprite.args.join(' ')).toContain('hstack=inputs=10')
+    expect(sprite.args.at(-1)).toBe('id-key.sprite.jpg')
+  })
 })

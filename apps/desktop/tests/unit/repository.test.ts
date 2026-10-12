@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase, type LibraryDatabase } from '../../src/main/library/database'
-import { migrate, SCHEMA_VERSION } from '../../src/main/library/migrations'
+import { MIGRATIONS, migrate, SCHEMA_VERSION } from '../../src/main/library/migrations'
 import { ftsQuery, LibraryRepository, safeJoin } from '../../src/main/library/repository'
 import type { ScanEntry } from '../../src/main/library/types'
 
@@ -37,6 +37,32 @@ describe('migrations', () => {
 
   it('is a no-op when run twice', () => {
     expect(migrate(db)).toEqual({ from: SCHEMA_VERSION, to: SCHEMA_VERSION })
+  })
+
+  it('keeps search working for libraries created before the search-id upgrade', () => {
+    const old = openDatabase(':memory:')
+    old.exec(MIGRATIONS[0] as string)
+    old.exec(MIGRATIONS[1] as string)
+    old.pragma('user_version = 2')
+    old.prepare(`insert into roots (id, path, label, added_at) values (1, '/r', 'r', 0)`).run()
+    old
+      .prepare(
+        `insert into assets (id, root_id, rel_path, filename, ext, kind, size, mtime, added_at,
+           indexed_at, last_seen_scan) values ('a', 1, 'FX/glow.mov', 'glow.mov', 'mov', 'video', 1, 1, 0, 0, 0)`
+      )
+      .run()
+    old
+      .prepare(
+        `insert into assets_fts (asset_id, filename, rel_path, tags) values ('a', 'glow.mov', 'FX/glow.mov', '')`
+      )
+      .run()
+    migrate(old)
+    const upgraded = new LibraryRepository(old)
+    expect(upgraded.query({ text: 'glow' }).items.map((a) => a.id)).toEqual(['a'])
+    upgraded.addTag('a', 'sparkle')
+    expect(upgraded.query({ text: 'sparkle' }).total).toBe(1)
+    expect(upgraded.query({ text: 'glow' }).total).toBe(1)
+    old.close()
   })
 
   it('refuses a database from a newer app version', () => {
@@ -141,7 +167,7 @@ describe('scanning', () => {
     const root = repo.addRoot('/r', 'r')
     scan(root.id, [entry('a.mp4', 'f1', 1000, 1)])
     const id = repo.query({}).items[0]!.id
-    repo.saveProbe(id, {
+    repo.saveProbe(id, 'f1', {
       width: 1920,
       height: 1080,
       durationMs: 5000,
@@ -154,6 +180,63 @@ describe('scanning', () => {
     expect(repo.getAsset(id)?.probeState).toBe('done')
     scan(root.id, [entry('a.mp4', 'f1-changed', 2000, 2)])
     expect(repo.getAsset(id)?.probeState).toBe('pending')
+  })
+
+  it('drops a probe result for a file that changed while it was being probed', () => {
+    const root = repo.addRoot('/r', 'r')
+    scan(root.id, [entry('a.mp4', 'f1', 1000, 1)])
+    const [job] = repo.pendingProbes(10)
+    scan(root.id, [entry('a.mp4', 'f2', 2000, 2)]) // rescan sees the new version
+    repo.saveProbe(job!.id, job!.fingerprint, {
+      width: 1,
+      height: 1,
+      durationMs: 1,
+      fps: 1,
+      codec: 'old',
+      hasAlpha: false,
+      channels: null,
+      sampleRate: null
+    })
+    expect(repo.getAsset(job!.id)?.probeState).toBe('pending')
+    expect(repo.pendingProbes(10)[0]?.fingerprint).toBe('f2')
+  })
+
+  it('drops generated media for a file that changed while it was being generated', () => {
+    const root = repo.addRoot('/r', 'r')
+    scan(root.id, [entry('a.mp4', 'aaaaaaaaaaaa-1', 1000, 1)])
+    const id = repo.query({}).items[0]!.id
+    db.prepare(`update assets set probe_state = 'done' where id = ?`).run(id)
+    const [job] = repo.pendingMedia(10)
+    scan(root.id, [entry('a.mp4', 'bbbbbbbbbbbb-2', 2000, 2)])
+    db.prepare(`update assets set probe_state = 'done' where id = ?`).run(id)
+    repo.saveMedia(id, job!.key, { thumb: 'old.jpg', sprite: null, preview: null, wave: null })
+    expect(repo.getAsset(id)?.media.thumb).toBe(false)
+    const [next] = repo.pendingMedia(10)
+    repo.saveMedia(id, next!.key, { thumb: 'new.jpg', sprite: null, preview: null, wave: null })
+    expect(repo.mediaFiles(id)?.thumb).toBe('new.jpg')
+  })
+
+  it('keeps tags added to a moved file while the scan was still running', () => {
+    const root = repo.addRoot('/r', 'r')
+    scan(root.id, [entry('old/a.mp4', 'fp')])
+    const original = repo.query({}).items[0]!.id
+    clock += 1000
+    const scanId = repo.startScan(root.id)
+    repo.applyScanBatch(root.id, scanId, [entry('new/a.mp4', 'fp')])
+    const copy = repo.query({}).items.find((a) => a.relPath === 'new/a.mp4')!.id
+    repo.addTag(copy, 'tagged-mid-scan')
+    repo.finishScan(root.id, scanId)
+    const assets = repo.query({}).items
+    expect(assets).toHaveLength(1)
+    expect(assets[0]?.id).toBe(original)
+    expect(assets[0]?.tags).toContain('tagged-mid-scan')
+    expect(repo.query({ text: 'new/a' }).total).toBe(1)
+  })
+
+  it('keeps only the latest scan record per root', () => {
+    const root = repo.addRoot('/r', 'r')
+    for (let i = 0; i < 5; i++) scan(root.id, [entry('a.mp4', 'f1')])
+    expect(db.prepare('select count(*) as n from scans').get()).toEqual({ n: 1 })
   })
 
   it('records unreadable files as errors instead of failing the scan', () => {
@@ -195,6 +278,13 @@ describe('queries', () => {
     expect(repo.query({ text: 'wh' }).total).toBe(2)
   })
 
+  it('uses short words to narrow a longer search', () => {
+    // "01" is too short for the search index; it must still narrow the results.
+    expect(repo.query({ text: 'transition 01' }).items.map((a) => a.filename)).toEqual([
+      'Glitch Transition 01.mov'
+    ])
+  })
+
   it('finds assets by tag', () => {
     const paper = repo.query({ text: 'paper' }).items[0]!
     repo.addTag(paper.id, 'grunge')
@@ -215,6 +305,32 @@ describe('queries', () => {
     repo.setFavorite(whip.id, true)
     expect(repo.query({ favoritesOnly: true }).items.map((a) => a.id)).toEqual([whip.id])
     expect(repo.counts()).toMatchObject({ total: 4, video: 2, audio: 1, image: 1, favorites: 1 })
+  })
+
+  it('never repeats or skips assets across pages when sort keys tie', () => {
+    const root = repo.addRoot('/r', 'r')
+    scan(
+      root.id,
+      Array.from({ length: 30 }, (_, i) => entry(`folder ${i}/preview.mp4`, `f${i}`))
+    )
+    const seen = new Set<string>()
+    for (let offset = 0; offset < 30; offset += 7) {
+      for (const asset of repo.query({ offset, limit: 7 }).items) seen.add(asset.id)
+    }
+    expect(seen.size).toBe(30)
+  })
+
+  it('lists catalog rows for available assets only', () => {
+    const online = repo.addRoot('/on', 'on')
+    const offline = repo.addRoot('/off', 'off')
+    scan(online.id, [entry('a.mp4', 'f1'), entry('gone.mp4', 'f2')])
+    scan(online.id, [entry('a.mp4', 'f1')]) // gone.mp4 is now missing
+    scan(offline.id, [entry('b.mp4', 'f3')])
+    repo.setRootStatus(offline.id, 'offline')
+    const rows = repo
+      .catalogRows()
+      .filter((row) => row.rootId === online.id || row.rootId === offline.id)
+    expect(rows.map((row) => row.relPath)).toEqual(['a.mp4'])
   })
 
   it('treats search text as literal, not query syntax', () => {

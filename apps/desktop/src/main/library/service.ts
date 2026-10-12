@@ -1,5 +1,5 @@
-import { stat } from 'fs/promises'
-import { basename } from 'path'
+import { readdir, rm, stat } from 'fs/promises'
+import { basename, join } from 'path'
 import type { LibraryRepository } from './repository'
 import type { RootRecord, ScanProgress } from '@shared/library'
 import { parseProbe } from '../media/probe'
@@ -14,19 +14,34 @@ export type LibraryEvent =
 const PROBE_BATCH = 24
 const PROBE_CONCURRENCY = 2
 const CHANGE_THROTTLE_MS = 400
+const PROGRESS_THROTTLE_MS = 250
 const MEDIA_BATCH = 8
 const CATALOG_DEBOUNCE_MS = 1500
+/** The catalog is rewritten at most this often while the library keeps changing (indexing). */
+const CATALOG_MIN_INTERVAL_MS = 10_000
+/** Cached media younger than this is never cleaned up: it may belong to a job still running. */
+const MEDIA_CLEANUP_GRACE_MS = 10 * 60 * 1000
+
+function isCrash(error: unknown): boolean {
+  return error instanceof WorkerError && error.code === 'crashed'
+}
 
 /**
  * Coordinates the library: scans roots in the worker, records results, probes media details,
  * and tells the UI what changed. All database access goes through the repository.
  */
 export class LibraryService {
-  private readonly scanning = new Set<number>()
+  /** Running scans, so removing a root can stop its scan. */
+  private readonly scanning = new Map<number, AbortController>()
+  private readonly lastProgress = new Map<number, number>()
   private probing = false
   private changeTimer: NodeJS.Timeout | null = null
   private generating = false
   private catalogTimer: NodeJS.Timeout | null = null
+  private catalogWriting: Promise<void> | null = null
+  private catalogDirty = false
+  private lastCatalogAt = 0
+  private cleaning = false
   /** Set on quit. After this, late results from the worker are ignored: the database is closing. */
   private stopped = false
 
@@ -53,6 +68,7 @@ export class LibraryService {
     for (const root of this.repo.listRoots()) void this.rescan(root.id)
     void this.probePending()
     this.scheduleCatalog()
+    void this.cleanupMedia()
   }
 
   async addRoot(path: string): Promise<RootRecord> {
@@ -65,8 +81,10 @@ export class LibraryService {
   }
 
   removeRoot(id: number): void {
+    this.scanning.get(id)?.abort()
     this.repo.removeRoot(id)
     this.notifyChanged()
+    void this.cleanupMedia()
   }
 
   /** Call after favorites or tags change so the panel's catalog stays current. */
@@ -82,12 +100,15 @@ export class LibraryService {
   async rescan(rootId: number): Promise<void> {
     const root = this.repo.getRoot(rootId)
     if (!root || this.scanning.has(rootId)) return
-    this.scanning.add(rootId)
+    const abort = new AbortController()
+    this.scanning.set(rootId, abort)
     const scanId = this.repo.startScan(rootId)
     let filesSeen = 0
-    this.emitProgress({ rootId, state: 'scanning', filesSeen })
+    // The root can be removed while its scan runs; after that its results go nowhere.
+    const gone = (): boolean => this.stopped || abort.signal.aborted || !this.repo.hasRoot(rootId)
+    this.emitProgress({ rootId, state: 'scanning', filesSeen }, true)
     try {
-      await this.worker.request(
+      const result = await this.worker.request(
         {
           type: 'scan',
           rootPath: root.path,
@@ -95,38 +116,60 @@ export class LibraryService {
           known: this.repo.knownFiles(rootId)
         },
         (entries) => {
-          if (this.stopped) return
+          if (gone()) return
           this.repo.applyScanBatch(rootId, scanId, entries)
           filesSeen += entries.length
           this.emitProgress({ rootId, state: 'scanning', filesSeen })
           this.notifyChanged()
-        }
+        },
+        abort.signal
       )
-      if (this.stopped) return
-      const summary = this.repo.finishScan(rootId, scanId)
-      this.emitProgress({ rootId, state: 'done', ...summary })
+      if (gone()) return
+      if (!result.complete) {
+        // Some folders couldn't be listed. Keep what was found but don't mark anything missing.
+        this.repo.abortScan(scanId)
+        this.emitProgress(
+          {
+            rootId,
+            state: 'failed',
+            filesSeen,
+            message: `Some folders in ${root.label} couldn't be read, so they weren't checked. Rescan to try again.`
+          },
+          true
+        )
+      } else {
+        const summary = this.repo.finishScan(rootId, scanId)
+        this.emitProgress({ rootId, state: 'done', ...summary }, true)
+      }
       void this.probePending()
     } catch (error) {
-      if (this.stopped) return
+      if (gone()) return
       this.repo.abortScan(scanId)
       if (error instanceof WorkerError && error.code === 'root-unavailable') {
         this.repo.setRootStatus(rootId, 'offline')
-        this.emitProgress({
-          rootId,
-          state: 'offline',
-          filesSeen,
-          message: `${root.label} isn't available. Connect the drive, then rescan.`
-        })
+        this.emitProgress(
+          {
+            rootId,
+            state: 'offline',
+            filesSeen,
+            message: `${root.label} isn't available. Connect the drive, then rescan.`
+          },
+          true
+        )
       } else {
-        this.emitProgress({
-          rootId,
-          state: 'failed',
-          filesSeen,
-          message: `Scanning ${root.label} stopped: ${(error as Error).message}`
-        })
+        this.emitProgress(
+          {
+            rootId,
+            state: 'failed',
+            filesSeen,
+            message: `Scanning ${root.label} stopped: ${(error as Error).message}`
+          },
+          true
+        )
       }
     } finally {
-      this.scanning.delete(rootId)
+      if (this.scanning.get(rootId) === abort) this.scanning.delete(rootId)
+      this.lastProgress.delete(rootId)
       this.notifyChanged()
     }
   }
@@ -135,26 +178,33 @@ export class LibraryService {
   async probePending(): Promise<void> {
     if (this.probing) return
     this.probing = true
+    let crashed = false
     try {
-      while (!this.stopped) {
+      while (!this.stopped && !crashed) {
         const batch = this.repo.pendingProbes(PROBE_BATCH)
         if (batch.length === 0) break
         const queue = [...batch]
         const workers = Array.from({ length: PROBE_CONCURRENCY }, async () => {
-          for (let job = queue.shift(); job; job = queue.shift()) {
+          for (let job = queue.shift(); job && !crashed; job = queue.shift()) {
+            if (job.kind === 'template') continue
             try {
-              if (job.kind === 'template') continue
               const json = await this.worker.request({
                 type: 'probe',
                 ffprobePath: this.binaries.ffprobe,
                 path: job.path
               })
               if (this.stopped) return
-              this.repo.saveProbe(job.id, parseProbe(json, job.kind))
-            } catch {
+              this.repo.saveProbe(job.id, job.fingerprint, parseProbe(json, job.kind))
+            } catch (error) {
               if (this.stopped) return
+              // A worker crash says nothing about this file: leave it pending for the next run.
+              if (isCrash(error)) {
+                crashed = true
+                return
+              }
               this.repo.saveProbeError(
                 job.id,
+                job.fingerprint,
                 "Couldn't read this file's media details. It may be damaged or still downloading."
               )
             }
@@ -173,8 +223,9 @@ export class LibraryService {
   async generateMedia(): Promise<void> {
     if (this.generating) return
     this.generating = true
+    let generated = 0
     try {
-      while (!this.stopped) {
+      outer: while (!this.stopped) {
         const batch = this.repo.pendingMedia(MEDIA_BATCH)
         if (batch.length === 0) break
         for (const asset of batch) {
@@ -199,9 +250,11 @@ export class LibraryService {
               preview: files.preview ?? null,
               wave: files.wave ?? null
             })
-          } catch {
+            generated++
+          } catch (error) {
             if (this.stopped) return
-            this.repo.saveMediaError(asset.id)
+            if (isCrash(error)) break outer
+            this.repo.saveMediaError(asset.id, asset.key)
           }
         }
         this.notifyChanged()
@@ -209,25 +262,83 @@ export class LibraryService {
     } finally {
       this.generating = false
     }
+    // Regenerated assets leave their old files behind; sweep once the queue is drained.
+    if (generated > 0 && !this.stopped) void this.cleanupMedia()
   }
 
-  /** Rewrites the panel's catalog shortly after the library settles. */
+  /**
+   * Deletes cached media that no asset refers to any more (removed folders, changed files).
+   * Only ever touches the app's own media cache folder.
+   */
+  async cleanupMedia(): Promise<number> {
+    if (this.cleaning || this.stopped) return 0
+    this.cleaning = true
+    let removed = 0
+    try {
+      const names = await readdir(this.paths.mediaDir).catch(() => [] as string[])
+      if (this.stopped) return 0
+      const referenced = this.repo.referencedMediaFiles()
+      const cutoff = Date.now() - MEDIA_CLEANUP_GRACE_MS
+      for (const name of names) {
+        if (this.stopped) break
+        if (referenced.has(name)) continue
+        const path = join(this.paths.mediaDir, name)
+        try {
+          const info = await stat(path)
+          if (!info.isFile() || info.mtimeMs > cutoff) continue
+          await rm(path, { force: true })
+          removed++
+        } catch {
+          // Already gone or locked; the next sweep tries again.
+        }
+      }
+    } finally {
+      this.cleaning = false
+    }
+    return removed
+  }
+
+  /**
+   * Rewrites the panel's catalog once the library settles, at most every few seconds while it
+   * keeps changing, and never two writes at once.
+   */
   private scheduleCatalog(): void {
-    if (this.stopped) return
-    if (this.catalogTimer) clearTimeout(this.catalogTimer)
+    if (this.stopped || this.catalogTimer) return
+    if (this.catalogWriting) {
+      this.catalogDirty = true
+      return
+    }
+    const wait = Math.max(
+      CATALOG_DEBOUNCE_MS,
+      this.lastCatalogAt + CATALOG_MIN_INTERVAL_MS - Date.now()
+    )
     this.catalogTimer = setTimeout(() => {
       this.catalogTimer = null
       if (this.stopped) return
+      this.lastCatalogAt = Date.now()
       try {
         const catalog = buildCatalog(this.repo, this.paths.mediaDir, this.paths.appVersion)
-        writeCatalog(this.paths.catalogDir, catalog).catch(() => undefined)
+        this.catalogWriting = writeCatalog(this.paths.catalogDir, catalog)
+          .then(() => undefined)
+          .catch(() => undefined)
+          .finally(() => {
+            this.catalogWriting = null
+            if (this.catalogDirty) {
+              this.catalogDirty = false
+              this.scheduleCatalog()
+            }
+          })
       } catch {
-        // A failed catalog write must never take the app down; the next change retries it.
+        // A failed catalog build must never take the app down; the next change retries it.
       }
-    }, CATALOG_DEBOUNCE_MS)
+    }, wait)
   }
 
-  private emitProgress(progress: ScanProgress): void {
+  /** Scan progress for the status bar; "scanning" updates are throttled per root. */
+  private emitProgress(progress: ScanProgress, force = false): void {
+    const now = Date.now()
+    if (!force && now - (this.lastProgress.get(progress.rootId) ?? 0) < PROGRESS_THROTTLE_MS) return
+    this.lastProgress.set(progress.rootId, now)
     this.emit({ type: 'scan-progress', progress })
   }
 

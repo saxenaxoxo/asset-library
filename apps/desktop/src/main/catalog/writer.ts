@@ -1,6 +1,6 @@
-import { mkdir, rename, writeFile } from 'fs/promises'
+import { mkdir, rename, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
-import type { LibraryRepository } from '../library/repository'
+import { safeJoin, type LibraryRepository } from '../library/repository'
 import { CATALOG_VERSION, type Catalog, type CatalogAsset } from '@catalog/types'
 
 export { CATALOG_VERSION } from '@catalog/types'
@@ -13,40 +13,32 @@ export function buildCatalog(
 ): Catalog {
   const roots = repo.listRoots()
   const rootLabel = new Map(roots.map((root) => [root.id, root.label]))
+  const media = (name: string | null): string | null => (name ? join(mediaDir, name) : null)
   const assets: CatalogAsset[] = []
-  const pageSize = 1000
-  for (let offset = 0; ; offset += pageSize) {
-    const page = repo.query({ sort: 'added', offset, limit: pageSize })
-    for (const asset of page.items) {
-      if (asset.status !== 'ok') continue
-      const path = repo.assetPath(asset.id)
-      if (!path) continue
-      const files = repo.mediaFiles(asset.id)
-      const media = (name: string | null | undefined): string | null =>
-        name ? join(mediaDir, name) : null
-      const slash = asset.relPath.lastIndexOf('/')
-      assets.push({
-        id: asset.id,
-        name: asset.filename,
-        kind: asset.kind,
-        path,
-        folder: slash === -1 ? '' : asset.relPath.slice(0, slash),
-        root: rootLabel.get(asset.rootId) ?? '',
-        durationMs: asset.durationMs,
-        width: asset.width,
-        height: asset.height,
-        fps: asset.fps,
-        hasAlpha: asset.hasAlpha,
-        favorite: asset.favorite,
-        tags: asset.tags,
-        addedAt: asset.addedAt,
-        thumb: media(files?.thumb),
-        sprite: media(files?.sprite),
-        preview: media(files?.preview),
-        wave: media(files?.wave)
-      })
-    }
-    if (offset + pageSize >= page.total) break
+  for (const row of repo.catalogRows()) {
+    const path = safeJoin(row.rootPath, row.relPath)
+    if (!path) continue
+    const slash = row.relPath.lastIndexOf('/')
+    assets.push({
+      id: row.id,
+      name: row.filename,
+      kind: row.kind,
+      path,
+      folder: slash === -1 ? '' : row.relPath.slice(0, slash),
+      root: rootLabel.get(row.rootId) ?? '',
+      durationMs: row.durationMs,
+      width: row.width,
+      height: row.height,
+      fps: row.fps,
+      hasAlpha: row.hasAlpha === null ? null : row.hasAlpha === 1,
+      favorite: row.favorite === 1,
+      tags: row.tags ? row.tags.split('\u001f') : [],
+      addedAt: row.addedAt,
+      thumb: media(row.thumb),
+      sprite: media(row.sprite),
+      preview: media(row.preview),
+      wave: media(row.wave)
+    })
   }
   return {
     version: CATALOG_VERSION,
@@ -58,12 +50,33 @@ export function buildCatalog(
   }
 }
 
+let tempCounter = 0
+
+/** On Windows a rename onto a file the panel is reading can briefly fail; retry a few times. */
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(from, to)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (attempt >= 4 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)))
+    }
+  }
+}
+
 /** Writes catalog.json atomically (temp file + rename), so the panel never reads half a file. */
 export async function writeCatalog(dir: string, catalog: Catalog): Promise<string> {
   await mkdir(dir, { recursive: true })
   const target = join(dir, 'catalog.json')
-  const temp = join(dir, `catalog.${process.pid}.tmp`)
-  await writeFile(temp, JSON.stringify(catalog))
-  await rename(temp, target)
+  const temp = join(dir, `catalog.${process.pid}.${++tempCounter}.tmp`)
+  try {
+    await writeFile(temp, JSON.stringify(catalog))
+    await renameWithRetry(temp, target)
+  } catch (error) {
+    await rm(temp, { force: true })
+    throw error
+  }
   return target
 }

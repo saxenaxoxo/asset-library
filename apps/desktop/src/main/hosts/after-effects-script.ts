@@ -14,6 +14,14 @@ export function jsString(value: string): string {
 }
 
 /**
+ * ExtendScript's File() reads "%XX" in a path as an escape, so a literal "%" in a file name
+ * ("50% off.mov") has to be written as "%25".
+ */
+export function extendScriptPath(path: string): string {
+  return path.replace(/%/g, '%25')
+}
+
+/**
  * ExtendScript for one asset:
  * - .ffx presets are applied to the selected layers of the active comp
  * - .aep projects are imported as projects
@@ -22,11 +30,13 @@ export function jsString(value: string): string {
  */
 export function afterEffectsScript(job: AfterEffectsJob): string {
   return `(function () {
-  var file = new File(${jsString(job.path)});
+  var file = new File(${jsString(extendScriptPath(job.path))});
   if (!file.exists) { alert("Asset Library: the file isn't where it was last seen. Rescan the folder."); return; }
   var name = file.name.toLowerCase();
   var comp = app.project.activeItem;
-  app.beginUndoGroup("Asset Library: " + decodeURI(file.name));
+  var label = file.name;
+  try { label = decodeURI(file.name); } catch (ignored) {}
+  app.beginUndoGroup("Asset Library: " + label);
   try {
     if (/\\.ffx$/.test(name)) {
       if (!(comp instanceof CompItem) || comp.selectedLayers.length === 0) {

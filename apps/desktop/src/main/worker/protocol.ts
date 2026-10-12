@@ -13,18 +13,22 @@ export type WorkerRequest =
     }
   | { id: number; type: 'probe'; ffprobePath: string; path: string }
   | { id: number; type: 'media'; ffmpegPath: string; outDir: string; jobs: MediaJob[] }
+  /** Stops a running scan early; the scan then resolves with what it found so far. */
+  | { id: number; type: 'cancel'; target: number }
 
 /** What each request type resolves to. */
 export interface WorkerResults {
   'ffprobe-version': string
-  scan: { filesSeen: number }
+  scan: { filesSeen: number; complete: boolean }
   /** Raw ffprobe JSON; parsed in main so parsing stays unit-testable. */
   probe: string
   /** Generated file name per output, or null where generation failed. */
   media: Partial<Record<MediaJob['output'], string | null>>
+  cancel: true
 }
 
-export type WorkerErrorCode = 'root-unavailable' | 'failed'
+/** `crashed`: the worker died mid-request, so the request says nothing about the file. */
+export type WorkerErrorCode = 'root-unavailable' | 'failed' | 'crashed'
 
 export type WorkerResponse =
   | { kind: 'result'; id: number; ok: true; value: unknown }

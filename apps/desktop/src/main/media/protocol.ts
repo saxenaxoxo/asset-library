@@ -56,8 +56,16 @@ export function parseRange(header: string | null, size: number): [number, number
 async function serveFile(path: string, request: Request): Promise<Response> {
   const info = await stat(path)
   const type = MIME[extname(path).toLowerCase()] ?? 'application/octet-stream'
-  const range = parseRange(request.headers.get('range'), info.size)
+  const header = request.headers.get('range')
+  const range = parseRange(header, info.size)
   const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' }
+  if (!range && header && /^bytes=(\d+-\d*|-\d+)$/.test(header.trim())) {
+    // A well-formed range outside the file (it shrank, or a stale player position).
+    return new Response(null, {
+      status: 416,
+      headers: { ...headers, 'Content-Range': `bytes */${info.size}` }
+    })
+  }
   if (range) {
     const [start, end] = range
     const body = Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream

@@ -112,6 +112,27 @@ describe('fingerprintFile', () => {
   })
 })
 
+describe('scanRoot completeness', () => {
+  it('reports a full walk as complete', async () => {
+    file('a.mp4')
+    const result = await scanRoot({ rootPath: root, exclusions: [], known: {}, onBatch: () => {} })
+    expect(result).toEqual({ filesSeen: 1, complete: true })
+  })
+
+  it('stops early when asked, and says the result is incomplete', async () => {
+    file('one/a.mp4')
+    file('two/b.mp4')
+    const result = await scanRoot({
+      rootPath: root,
+      exclusions: [],
+      known: {},
+      onBatch: () => {},
+      shouldStop: () => true
+    })
+    expect(result.complete).toBe(false)
+  })
+})
+
 describe('isExcluded', () => {
   it('matches the folder and everything inside, but not similar names', () => {
     expect(isExcluded('Footage/raw', ['Footage/raw'])).toBe(true)

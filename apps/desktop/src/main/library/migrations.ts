@@ -1,13 +1,14 @@
 import type { LibraryDatabase } from './database'
 import m0001 from './migrations/0001-initial.sql?raw'
 import m0002 from './migrations/0002-media.sql?raw'
+import m0003 from './migrations/0003-search-ids.sql?raw'
 
 /**
  * Schema migrations, applied in order. Each lives in ./migrations/NNNN-name.sql and is append
  * only: never edit one once it has shipped. Add a new file and list it
  * here. The database's `user_version` is the number applied.
  */
-export const MIGRATIONS: readonly string[] = [m0001, m0002]
+export const MIGRATIONS: readonly string[] = [m0001, m0002, m0003]
 
 export const SCHEMA_VERSION = MIGRATIONS.length
 

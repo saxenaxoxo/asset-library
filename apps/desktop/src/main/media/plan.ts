@@ -42,6 +42,39 @@ function even(value: number): number {
   return Math.max(2, Math.round(value / 2) * 2)
 }
 
+/** Clips longer than this get their sprite frames by seeking instead of decoding everything. */
+export const SPRITE_SEEK_MIN_SECONDS = 10
+
+/**
+ * Inputs and filters for a hover-scrub strip of SPRITE_FRAMES frames spread over the clip.
+ * Short clips are decoded once and sampled; long ones (hours of 4K ProRes would otherwise hit
+ * the job timeout) open one seeked input per frame and stack the frames side by side.
+ */
+function spriteArgs(input: string, durationS: number): string[] {
+  const scale = `scale=${SPRITE_FRAME_WIDTH}:-2:flags=bicubic,setsar=1`
+  if (durationS <= SPRITE_SEEK_MIN_SECONDS) {
+    const rate = (SPRITE_FRAMES / durationS).toFixed(6)
+    return [
+      '-i',
+      input,
+      '-an',
+      '-vf',
+      `fps=${rate},${scale},tile=${SPRITE_FRAMES}x1`,
+      '-frames:v',
+      '1'
+    ]
+  }
+  const inputs: string[] = []
+  const chains: string[] = []
+  for (let i = 0; i < SPRITE_FRAMES; i++) {
+    const at = (durationS * (i + 0.5)) / SPRITE_FRAMES
+    inputs.push('-ss', at.toFixed(3), '-i', input)
+    chains.push(`[${i}:v]trim=end_frame=1,${scale}[f${i}]`)
+  }
+  const stack = `${Array.from({ length: SPRITE_FRAMES }, (_, i) => `[f${i}]`).join('')}hstack=inputs=${SPRITE_FRAMES}`
+  return [...inputs, '-an', '-filter_complex', `${chains.join(';')};${stack}`, '-frames:v', '1']
+}
+
 /**
  * Which files to generate for an asset, and how. Transparent media keeps its alpha in
  * thumbnails and sprites (PNG); preview videos sit on a neutral matte because H.264 has no alpha.
@@ -96,22 +129,10 @@ export function mediaPlan(asset: MediaPlanInput): MediaJob[] {
 
     if (durationS && durationS > 0.2) {
       const sprite = `${base}.sprite.${stillExt}`
-      const rate = (SPRITE_FRAMES / durationS).toFixed(6)
       jobs.push({
         output: 'sprite',
         file: sprite,
-        args: [
-          ...COMMON,
-          '-i',
-          input,
-          '-an',
-          '-vf',
-          `fps=${rate},scale=${SPRITE_FRAME_WIDTH}:-2:flags=bicubic,tile=${SPRITE_FRAMES}x1`,
-          '-frames:v',
-          '1',
-          ...stillCodec,
-          sprite
-        ]
+        args: [...COMMON, ...spriteArgs(input, durationS), ...stillCodec, sprite]
       })
     }
 

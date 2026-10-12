@@ -11,6 +11,9 @@ const FFPROBE_TIMEOUT_MS = 20_000
 const FFMPEG_TIMEOUT_MS = 90_000
 const MAX_PROBE_OUTPUT = 4 * 1024 * 1024
 
+/** Scans asked to stop early (their root was removed). */
+const cancelled = new Set<number>()
+
 function send(message: WorkerMessage): void {
   process.parentPort.postMessage(message)
 }
@@ -32,14 +35,21 @@ async function handle(request: WorkerRequest): Promise<unknown> {
       return ffmpegVersion(stdout.split('\n')[0] ?? '')
     }
     case 'scan': {
-      const filesSeen = await scanRoot({
-        rootPath: request.rootPath,
-        exclusions: request.exclusions,
-        known: request.known,
-        onBatch: (entries) => send({ kind: 'scan-batch', requestId: request.id, entries })
-      })
-      return { filesSeen }
+      try {
+        return await scanRoot({
+          rootPath: request.rootPath,
+          exclusions: request.exclusions,
+          known: request.known,
+          onBatch: (entries) => send({ kind: 'scan-batch', requestId: request.id, entries }),
+          shouldStop: () => cancelled.has(request.id)
+        })
+      } finally {
+        cancelled.delete(request.id)
+      }
     }
+    case 'cancel':
+      cancelled.add(request.target)
+      return true
     case 'probe':
       return run(request.ffprobePath, [...PROBE_ARGS, request.path], FFPROBE_TIMEOUT_MS)
     case 'media': {

@@ -13,36 +13,51 @@ export interface AfterEffectsInstall {
 
 function run(file: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout: 20_000 }, (error, stdout, stderr) => {
+    // Generous: After Effects runs the script synchronously, and importing a big .aep takes time.
+    execFile(file, args, { timeout: 120_000 }, (error, stdout, stderr) => {
       if (error) reject(new Error(stderr.trim() || error.message))
       else resolve(stdout.trim())
     })
   })
 }
 
-/** Finds the newest installed After Effects ("Adobe After Effects 2026" etc.). */
-export function findAfterEffects(
+const AE_FOLDER = /^Adobe After Effects (\d{4}|CC \d{4}|\(Beta\)|Beta)$/
+
+/** Newest first: release years descending ("CC 2019" counts as 2019), betas after releases. */
+export function sortAfterEffectsFolders(names: readonly string[]): string[] {
+  const year = (name: string): number => Number(/(\d{4})$/.exec(name)?.[1] ?? 0)
+  return names.filter((name) => AE_FOLDER.test(name)).sort((a, b) => year(b) - year(a))
+}
+
+/** Every installed After Effects, newest first ("Adobe After Effects 2026" etc.). */
+export function findAfterEffectsInstalls(
   platform: NodeJS.Platform = process.platform
-): AfterEffectsInstall | null {
+): AfterEffectsInstall[] {
   const base = platform === 'win32' ? 'C:\\Program Files\\Adobe' : '/Applications'
   let names: string[]
   try {
-    names = readdirSync(base).filter((name) =>
-      /^Adobe After Effects (\d{4}|CC \d{4}|Beta)$/.test(name)
-    )
+    names = sortAfterEffectsFolders(readdirSync(base))
   } catch {
-    return null
+    return []
   }
-  names.sort().reverse()
+  const installs: AfterEffectsInstall[] = []
   for (const name of names) {
+    const version = name.replace('Adobe After Effects ', '')
     if (platform === 'win32') {
       const exe = join(base, name, 'Support Files', 'AfterFX.exe')
-      if (existsSync(exe)) return { target: exe, version: name.replace('Adobe After Effects ', '') }
+      if (existsSync(exe)) installs.push({ target: exe, version })
     } else if (existsSync(join(base, name, `${name}.app`))) {
-      return { target: name, version: name.replace('Adobe After Effects ', '') }
+      installs.push({ target: name, version })
     }
   }
-  return null
+  return installs
+}
+
+/** The newest installed After Effects, or null. */
+export function findAfterEffects(
+  platform: NodeJS.Platform = process.platform
+): AfterEffectsInstall | null {
+  return findAfterEffectsInstalls(platform)[0] ?? null
 }
 
 async function isRunning(install: AfterEffectsInstall): Promise<boolean> {
@@ -68,10 +83,19 @@ async function isRunning(install: AfterEffectsInstall): Promise<boolean> {
  * if it isn't running, the user is asked to open it first.
  */
 export async function sendToAfterEffects(job: AfterEffectsJob): Promise<string> {
-  const install = findAfterEffects()
-  if (!install) throw new Error("After Effects isn't installed on this computer.")
-  if (!(await isRunning(install))) {
-    throw new Error(`Open After Effects ${install.version} with a project, then send again.`)
+  const installs = findAfterEffectsInstalls()
+  const newest = installs[0]
+  if (!newest) throw new Error("After Effects isn't installed on this computer.")
+  // With several versions installed, send to whichever one is open.
+  let install: AfterEffectsInstall | undefined
+  for (const candidate of installs) {
+    if (await isRunning(candidate)) {
+      install = candidate
+      break
+    }
+  }
+  if (!install) {
+    throw new Error(`Open After Effects ${newest.version} with a project, then send again.`)
   }
   const dir = await mkdtemp(join(tmpdir(), 'asset-library-ae-'))
   const script = join(dir, 'send.jsx')

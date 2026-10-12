@@ -4,9 +4,13 @@ copyright: Copyright © 2026 Saxenas Creation
 directories:
   buildResources: build
   output: dist
+# Each platform lists its files in full: a platform list of only exclusions would pull in the
+# whole folder (every platform's FFmpeg).
 files:
   - out/**
   - package.json
+  # The drag-out icon is loaded from disk at runtime; without it macOS refuses to start a drag.
+  - resources/drag-icon.png
   - '!**/*.map'
 asarUnpack:
   - resources/**
@@ -21,6 +25,13 @@ mac:
     - target: zip
       arch: [arm64, x64]
   entitlementsInherit: build/entitlements.mac.plist
+  files:
+    - out/**
+    - package.json
+    - resources/drag-icon.png
+    - '!**/*.map'
+    # Only ship the SQLite binaries this platform can load.
+    - '!**/better-sqlite3/prebuilds/{linux,linuxmusl,win32}-*'
   # No Apple Developer ID by founder decision. Ad-hoc signing ("-") keeps the bundle's
   # signature valid so Apple Silicon shows "Open Anyway" instead of "damaged".
   notarize: false
@@ -40,6 +51,13 @@ win:
     - target: nsis
       arch: [x64]
   executableName: Asset Library
+  files:
+    - out/**
+    - package.json
+    - resources/drag-icon.png
+    - '!**/*.map'
+    - '!**/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*'
+    - '!**/better-sqlite3/prebuilds/win32-arm64.node'
   extraResources:
     - from: resources/ffmpeg/win32-${arch}
       to: ffmpeg

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
-import { isAbsolute, join, relative, resolve, sep } from 'path'
+import { isAbsolute, relative, resolve, sep } from 'path'
+import type { Statement } from 'better-sqlite3'
 import type { LibraryDatabase } from './database'
 import { extensionOf, kindForFile, type AssetKind } from '@shared/media-types'
 import type {
@@ -48,11 +49,33 @@ interface AssetRow {
 }
 
 const SORT_SQL: Record<AssetSort, string> = {
-  added: 'a.added_at desc, a.filename',
-  name: 'a.filename collate nocase, a.rel_path',
-  modified: 'a.mtime desc, a.filename',
-  size: 'a.size desc, a.filename',
-  duration: 'a.duration_ms is null, a.duration_ms desc, a.filename'
+  added: 'a.added_at desc, a.filename, a.id',
+  name: 'a.filename collate nocase, a.rel_path, a.id',
+  modified: 'a.mtime desc, a.filename, a.id',
+  size: 'a.size desc, a.filename, a.id',
+  duration: 'a.duration_ms is null, a.duration_ms desc, a.filename, a.id'
+}
+
+/** One asset as `catalogRows()` returns it. Booleans are SQLite integers; tags joined by \u001f. */
+export interface CatalogRow {
+  id: string
+  rootId: number
+  rootPath: string
+  relPath: string
+  filename: string
+  kind: AssetKind
+  durationMs: number | null
+  width: number | null
+  height: number | null
+  fps: number | null
+  hasAlpha: number | null
+  favorite: number
+  addedAt: number
+  thumb: string | null
+  sprite: string | null
+  preview: string | null
+  wave: string | null
+  tags: string | null
 }
 
 /** "Recently added" means added in the last 14 days. */
@@ -94,6 +117,11 @@ function toRecord(row: AssetRow): AssetRecord {
   }
 }
 
+/** Search words too short for the trigram index (1–2 characters). */
+export function shortWords(text: string): string[] {
+  return text.split(/\s+/).filter((word) => word.length > 0 && word.length < 3)
+}
+
 /** Builds an FTS5 query that matches every word as a substring (trigram), safely quoted. */
 export function ftsQuery(text: string): string | null {
   const words = text
@@ -106,10 +134,22 @@ export function ftsQuery(text: string): string | null {
 
 /** All database access for the library. Synchronous (better-sqlite3); keep calls small. */
 export class LibraryRepository {
+  private readonly statements = new Map<string, Statement>()
+
   constructor(
     private readonly db: LibraryDatabase,
     private readonly now: () => number = Date.now
   ) {}
+
+  /** Prepares a statement once and reuses it; hot paths run thousands of times per scan. */
+  private sql(text: string): Statement {
+    let statement = this.statements.get(text)
+    if (!statement) {
+      statement = this.db.prepare(text)
+      this.statements.set(text, statement)
+    }
+    return statement
+  }
 
   // ── Roots ────────────────────────────────────────────────────────────────
 
@@ -135,6 +175,10 @@ export class LibraryRepository {
     return row ? { ...row, scanning: row.scanning === 1 } : null
   }
 
+  hasRoot(id: number): boolean {
+    return this.sql('select 1 from roots where id = ?').get(id) !== undefined
+  }
+
   listRoots(): RootRecord[] {
     const ids = this.db.prepare('select id from roots order by label collate nocase').all() as {
       id: number
@@ -147,7 +191,7 @@ export class LibraryRepository {
     const remove = this.db.transaction(() => {
       this.db
         .prepare(
-          'delete from assets_fts where asset_id in (select id from assets where root_id = ?)'
+          'delete from assets_fts where rowid in (select search_id from assets where root_id = ?)'
         )
         .run(id)
       this.db.prepare('delete from roots where id = ?').run(id)
@@ -232,9 +276,10 @@ export class LibraryRepository {
     )
     const insert = this.db.prepare(
       `insert into assets (id, root_id, rel_path, filename, ext, kind, size, mtime, fingerprint,
-         status, error_msg, added_at, indexed_at, last_seen_scan)
+         status, error_msg, added_at, indexed_at, last_seen_scan, search_id)
        values (@id, @rootId, @relPath, @filename, @ext, @kind, @size, @mtime, @fingerprint,
-         @status, @error, @now, @now, @scanId)`
+         @status, @error, @now, @now, @scanId,
+         (select coalesce(max(search_id), 0) + 1 from assets))`
     )
     const apply = this.db.transaction(() => {
       for (const entry of entries) {
@@ -276,7 +321,7 @@ export class LibraryRepository {
             now,
             scanId
           })
-          this.refreshSearch(id)
+          this.refreshSearch(id, true)
         }
       }
       this.db
@@ -298,11 +343,10 @@ export class LibraryRepository {
            where root_id = ? and last_seen_scan < ? and status != 'missing'`
         )
         .all(rootId, scanId) as { id: string; fingerprint: string | null }[]
-      const scanStart = (
-        this.db.prepare('select started_at from scans where id = ?').get(scanId) as {
-          started_at: number
-        }
-      ).started_at
+      const scan = this.db.prepare('select started_at from scans where id = ?').get(scanId) as
+        { started_at: number } | undefined
+      if (!scan) throw new Error('This scan was cancelled.')
+      const scanStart = scan.started_at
       const added = this.db
         .prepare(
           `select id, rel_path, filename, fingerprint from assets
@@ -327,7 +371,22 @@ export class LibraryRepository {
           continue
         }
         newByFingerprint.delete(old.fingerprint as string)
-        this.db.prepare('delete from assets_fts where asset_id = ?').run(match.id)
+        // Keep anything the user did to the new copy while the scan was running.
+        this.db
+          .prepare(
+            'insert or ignore into asset_tags (asset_id, tag_id) select ?, tag_id from asset_tags where asset_id = ?'
+          )
+          .run(old.id, match.id)
+        this.db
+          .prepare(
+            'update assets set favorite = max(favorite, (select favorite from assets where id = ?)) where id = ?'
+          )
+          .run(match.id, old.id)
+        this.db
+          .prepare(
+            'delete from assets_fts where rowid = (select search_id from assets where id = ?)'
+          )
+          .run(match.id)
         this.db.prepare('delete from assets where id = ?').run(match.id)
         this.db
           .prepare(
@@ -345,6 +404,9 @@ export class LibraryRepository {
       this.db
         .prepare(`update scans set state = 'done', finished_at = ? where id = ?`)
         .run(this.now(), scanId)
+      this.db
+        .prepare(`delete from scans where root_id = ? and id != ? and state != 'running'`)
+        .run(rootId, scanId)
       this.db
         .prepare('update roots set last_scan_at = ?, status = ? where id = ?')
         .run(this.now(), 'ok', rootId)
@@ -368,44 +430,57 @@ export class LibraryRepository {
 
   // ── Metadata ─────────────────────────────────────────────────────────────
 
-  pendingProbes(limit: number): { id: string; path: string; kind: AssetKind }[] {
+  pendingProbes(
+    limit: number
+  ): { id: string; path: string; kind: AssetKind; fingerprint: string | null }[] {
     const rows = this.db
       .prepare(
-        `select a.id, a.rel_path, a.kind, r.path as root_path from assets a join roots r on r.id = a.root_id
+        `select a.id, a.rel_path, a.kind, a.fingerprint, r.path as root_path
+         from assets a join roots r on r.id = a.root_id
          where a.probe_state = 'pending' and a.status = 'ok' and r.status = 'ok' and a.kind != 'template'
          order by a.added_at desc limit ?`
       )
-      .all(limit) as { id: string; rel_path: string; kind: AssetKind; root_path: string }[]
-    return rows.map((row) => ({
-      id: row.id,
-      kind: row.kind,
-      path: join(row.root_path, row.rel_path)
-    }))
+      .all(limit) as {
+      id: string
+      rel_path: string
+      kind: AssetKind
+      fingerprint: string | null
+      root_path: string
+    }[]
+    return rows.flatMap((row) => {
+      const path = safeJoin(row.root_path, row.rel_path)
+      return path ? [{ id: row.id, kind: row.kind, path, fingerprint: row.fingerprint }] : []
+    })
   }
 
-  saveProbe(id: string, result: ProbeResult): void {
-    this.db
-      .prepare(
-        `update assets set width = ?, height = ?, duration_ms = ?, fps = ?, codec = ?, has_alpha = ?,
-           channels = ?, sample_rate = ?, probe_state = 'done' where id = ?`
-      )
-      .run(
-        result.width,
-        result.height,
-        result.durationMs,
-        result.fps,
-        result.codec,
-        result.hasAlpha === null ? null : result.hasAlpha ? 1 : 0,
-        result.channels,
-        result.sampleRate,
-        id
-      )
+  /**
+   * Saves probe results, unless the file changed while it was being probed (a rescan reset it
+   * to pending with a new fingerprint); then the stale result is dropped and it's probed again.
+   */
+  saveProbe(id: string, fingerprint: string | null, result: ProbeResult): void {
+    this.sql(
+      `update assets set width = ?, height = ?, duration_ms = ?, fps = ?, codec = ?, has_alpha = ?,
+         channels = ?, sample_rate = ?, probe_state = 'done'
+       where id = ? and probe_state = 'pending' and fingerprint is ?`
+    ).run(
+      result.width,
+      result.height,
+      result.durationMs,
+      result.fps,
+      result.codec,
+      result.hasAlpha === null ? null : result.hasAlpha ? 1 : 0,
+      result.channels,
+      result.sampleRate,
+      id,
+      fingerprint
+    )
   }
 
-  saveProbeError(id: string, message: string): void {
-    this.db
-      .prepare(`update assets set probe_state = 'error', error_msg = ? where id = ?`)
-      .run(message, id)
+  saveProbeError(id: string, fingerprint: string | null, message: string): void {
+    this.sql(
+      `update assets set probe_state = 'error', error_msg = ?
+       where id = ? and probe_state = 'pending' and fingerprint is ?`
+    ).run(message, id, fingerprint)
   }
 
   // ── Generated media ──────────────────────────────────────────────────────
@@ -444,23 +519,26 @@ export class LibraryRepository {
           durationMs: row.duration_ms,
           width: row.width,
           height: row.height,
-          key: (row.fingerprint ?? 'nofp').slice(0, 10)
+          key: mediaKey(row.fingerprint)
         }
       ]
     })
   }
 
+  /** Saves generated media, unless the file changed meanwhile (its key no longer matches). */
   saveMedia(id: string, key: string, files: MediaFiles): void {
-    this.db
-      .prepare(
-        `update assets set media_state = 'done', media_key = ?, thumb_file = ?, sprite_file = ?,
-           preview_file = ?, wave_file = ? where id = ?`
-      )
-      .run(key, files.thumb, files.sprite, files.preview, files.wave, id)
+    this.sql(
+      `update assets set media_state = 'done', media_key = ?, thumb_file = ?, sprite_file = ?,
+         preview_file = ?, wave_file = ?
+       where id = ? and media_state = 'pending' and ${MEDIA_KEY_SQL} = ?`
+    ).run(key, files.thumb, files.sprite, files.preview, files.wave, id, key)
   }
 
-  saveMediaError(id: string): void {
-    this.db.prepare(`update assets set media_state = 'error' where id = ?`).run(id)
+  saveMediaError(id: string, key: string): void {
+    this.sql(
+      `update assets set media_state = 'error'
+       where id = ? and media_state = 'pending' and ${MEDIA_KEY_SQL} = ?`
+    ).run(id, key)
   }
 
   /** Cached media file names for an asset (relative to the media folder). */
@@ -495,6 +573,27 @@ export class LibraryRepository {
     return files
   }
 
+  /**
+   * Every available asset (root online, file present) with what the panel catalog needs, in one
+   * pass. Ordered newest first, like the app's default view.
+   */
+  catalogRows(): CatalogRow[] {
+    return this.db
+      .prepare(
+        `select a.id, a.root_id as rootId, r.path as rootPath, a.rel_path as relPath,
+           a.filename, a.kind, a.duration_ms as durationMs, a.width, a.height, a.fps,
+           a.has_alpha as hasAlpha, a.favorite, a.added_at as addedAt,
+           a.thumb_file as thumb, a.sprite_file as sprite, a.preview_file as preview,
+           a.wave_file as wave,
+           (select group_concat(t.name, char(31)) from asset_tags at join tags t on t.id = at.tag_id
+             where at.asset_id = a.id) as tags
+         from assets a join roots r on r.id = a.root_id
+         where a.status = 'ok' and r.status = 'ok'
+         order by ${SORT_SQL.added}`
+      )
+      .all() as CatalogRow[]
+  }
+
   // ── Queries ──────────────────────────────────────────────────────────────
 
   query(query: AssetQuery): { total: number; items: AssetRecord[] } {
@@ -523,12 +622,19 @@ export class LibraryRepository {
     }
     const fts = query.text ? ftsQuery(query.text) : null
     if (fts) {
-      where.push('a.id in (select asset_id from assets_fts where assets_fts match ?)')
+      where.push('a.search_id in (select rowid from assets_fts where assets_fts match ?)')
       params.push(fts)
-    } else if (query.text && query.text.trim().length > 0) {
-      // Fewer than 3 characters: trigram FTS can't help, fall back to a prefix/substring LIKE.
-      where.push(`(a.filename like ? escape '\\' collate nocase)`)
-      params.push(`%${query.text.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`)
+    }
+    // Words under 3 characters ("4k", "02") are too short for the trigram index; each one must
+    // still match the name, folder or a tag, so "clip 02" doesn't return every clip.
+    for (const word of shortWords(query.text ?? '')) {
+      const like = `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+      where.push(
+        `(a.filename like ? escape '\\' or a.rel_path like ? escape '\\' or exists (
+           select 1 from asset_tags at join tags t on t.id = at.tag_id
+           where at.asset_id = a.id and t.name like ? escape '\\'))`
+      )
+      params.push(like, like, like)
     }
     const whereSql = where.length > 0 ? `where ${where.join(' and ')}` : ''
     const total = (
@@ -647,19 +753,30 @@ export class LibraryRepository {
       .all() as { name: string; count: number }[]
   }
 
-  private refreshSearch(assetId: string): void {
-    this.db.prepare('delete from assets_fts where asset_id = ?').run(assetId)
-    this.db
-      .prepare(
-        `insert into assets_fts (asset_id, filename, rel_path, tags)
-         select a.id, a.filename, a.rel_path,
-           coalesce((select group_concat(t.name, ' ') from asset_tags at join tags t on t.id = at.tag_id
-             where at.asset_id = a.id), '')
-         from assets a where a.id = ?`
-      )
-      .run(assetId)
+  /** Rewrites an asset's search row. `fresh` skips the delete for assets that never had one. */
+  private refreshSearch(assetId: string, fresh = false): void {
+    if (!fresh) {
+      this.sql(
+        'delete from assets_fts where rowid = (select search_id from assets where id = ?)'
+      ).run(assetId)
+    }
+    this.sql(
+      `insert into assets_fts (rowid, filename, rel_path, tags)
+       select a.search_id, a.filename, a.rel_path,
+         coalesce((select group_concat(t.name, ' ') from asset_tags at join tags t on t.id = at.tag_id
+           where at.asset_id = a.id), '')
+       from assets a where a.id = ?`
+    ).run(assetId)
   }
 }
+
+/** Short content key for generated media; changes when the file changes, so cache is never stale. */
+export function mediaKey(fingerprint: string | null): string {
+  return (fingerprint ?? 'nofp').slice(0, 10)
+}
+
+/** The same key computed in SQL, to check a result still belongs to the current file. */
+const MEDIA_KEY_SQL = `substr(coalesce(fingerprint, 'nofp'), 1, 10)`
 
 /** Joins a root and a relative path, refusing anything that escapes the root. */
 export function safeJoin(rootPath: string, relPath: string): string | null {

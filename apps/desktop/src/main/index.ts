@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme } from 'electron'
+import { app, BrowserWindow, dialog, nativeTheme } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
@@ -41,13 +41,24 @@ if (!app.requestSingleInstanceLock()) {
     app.on('browser-window-created', (_event, window) => optimizer.watchWindowShortcuts(window))
 
     const dbFile = join(app.getPath('userData'), 'library.db')
-    const db = openDatabase(dbFile)
-    // Keep a copy before changing the schema, so a failed upgrade can be recovered by hand.
-    if (needsMigration(db) && existsSync(dbFile)) {
-      db.pragma('wal_checkpoint(TRUNCATE)')
-      copyFileSync(dbFile, `${dbFile}.bak`)
+    let db: ReturnType<typeof openDatabase>
+    try {
+      db = openDatabase(dbFile)
+      // Keep a copy before changing the schema, so a failed upgrade can be recovered by hand.
+      if (needsMigration(db) && existsSync(dbFile)) {
+        db.pragma('wal_checkpoint(TRUNCATE)')
+        copyFileSync(dbFile, `${dbFile}.bak`)
+      }
+      migrate(db)
+    } catch (error) {
+      // Without this the app would sit in the Dock with no window and no explanation.
+      dialog.showErrorBox(
+        "Asset Library couldn't open your library",
+        `${(error as Error).message}\n\nYour files are untouched. The library is stored in:\n${dbFile}`
+      )
+      app.exit(1)
+      return
     }
-    migrate(db)
     const repo = new LibraryRepository(db)
     const worker = new WorkerClient()
     const binaries = mediaBinaries({
