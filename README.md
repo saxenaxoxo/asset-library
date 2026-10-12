@@ -5,17 +5,18 @@
 <h1 align="center">Asset Library</h1>
 <p align="center">by Saxenas Creation</p>
 
-A free desktop asset manager for video editors and motion designers. Point it at your folders and
-external drives, and it indexes your transitions, overlays, sound effects, music, footage and images.
-You can then search, preview, tag and favorite them, and drag the original files straight into
-Premiere Pro, After Effects or any other app.
+A free alternative to Premiere Composer for your **own** assets. Point Asset Library at your folders
+and external drives, and it indexes your transitions, overlays, sound effects, music, footage and
+images. Browse and preview them in a **panel inside Premiere Pro** and place them at the playhead, or
+use the desktop app to search, tag, favorite, and drag originals into Premiere Pro, After Effects or
+any other app.
 
 - **Local and private.** No account, no cloud, no telemetry. Works offline.
 - **Your files stay put.** Asset Library never moves, renames, changes or deletes your files.
 - **macOS and Windows.** Apple Silicon, Intel and Windows x64.
 
-> **Status:** early development (Milestone 1 of 6). Not ready for use yet. See
-> [docs/product/v1-spec.md](docs/product/v1-spec.md) for the plan.
+> **Status:** in development, not released yet. The desktop library and the Premiere Pro panel work;
+> hands-on testing in Premiere is under way. See [docs/product/v1-spec.md](docs/product/v1-spec.md).
 
 ## Install (once releases exist)
 
@@ -35,6 +36,8 @@ pnpm dev          # run with hot reload
 pnpm check        # typecheck + lint + unit tests
 pnpm test:e2e     # launch the built app with Playwright
 pnpm dist:mac     # unsigned .dmg into apps/desktop/dist/  (pnpm dist:win for the .exe)
+pnpm panel:watch  # build the Premiere panel and rebuild on change
+pnpm panel:package  # installable .ccx into apps/premiere-panel/release/
 ```
 
 ## Project map
