@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import nodePath from 'path'
 import {
-  bundledPanelFile,
+  bundledPanelFiles,
   compareVersions,
   installedPanelVersions,
   installSucceeded,
@@ -17,13 +17,15 @@ import {
 const MAC_UPIA =
   '/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent.app/Contents/MacOS/UnifiedPluginInstallerAgent'
 
-// Output shaped like Adobe's installer prints it.
-const list = (...versions: string[]): string =>
+// Output shaped like Adobe's installer prints it: the UXP build under the product name, the CEP
+// build under "<product> CEP".
+const list = (versions: string[], cepVersions: string[] = []): string =>
   [
-    `${versions.length} extension(s) installed for Premiere Pro (ver 26.0.0)`,
+    `${versions.length + cepVersions.length} extension(s) installed for Premiere Pro (ver 26.0.0)`,
     '        Status        Extension ID                       Version',
     '  =================================================================',
     ...versions.map((v) => `        Enabled       Asset Library                      ${v}`),
+    ...cepVersions.map((v) => `        Enabled       Asset Library CEP                  ${v}`),
     '        Enabled       Some Other Panel                   9.9.9'
   ].join('\n')
 
@@ -42,12 +44,12 @@ describe('Adobe installer paths and arguments', () => {
       '--remove',
       'Asset Library'
     ])
-    expect(upiaArgs('darwin', { action: 'install', ccx: '/a/p.ccx' })).toEqual([
+    expect(upiaArgs('darwin', { action: 'install', file: '/a/p.ccx' })).toEqual([
       '--install',
       '/a/p.ccx'
     ])
     expect(upiaArgs('darwin', { action: 'list' })).toEqual(['--list', 'all'])
-    expect(upiaArgs('win32', { action: 'install', ccx: 'C:\\p.ccx' })).toEqual([
+    expect(upiaArgs('win32', { action: 'install', file: 'C:\\p.ccx' })).toEqual([
       '/install',
       'C:\\p.ccx'
     ])
@@ -66,15 +68,18 @@ describe('reading the installer output', () => {
     expect(installSucceeded('Installation failed. Error code -165')).toBe(false)
   })
 
-  it('reads every installed version of our panel, ignoring other panels', () => {
-    expect(installedPanelVersions(list('0.3.14'), 'Asset Library')).toEqual(['0.3.14'])
-    expect(installedPanelVersions(list('0.2.1', '0.2.2', '0.3.0'), 'Asset Library')).toEqual([
+  it('reads every installed version of our panel, ignoring other panels and the CEP build', () => {
+    const both = list(['0.3.9', '0.3.14'], ['0.4.0'])
+    expect(installedPanelVersions(both, 'Asset Library')).toEqual(['0.3.9', '0.3.14'])
+    expect(installedPanelVersions(both, 'Asset Library CEP')).toEqual(['0.4.0'])
+    expect(installedPanelVersions(list(['0.3.14']), 'Asset Library')).toEqual(['0.3.14'])
+    expect(installedPanelVersions(list(['0.2.1', '0.2.2', '0.3.0']), 'Asset Library')).toEqual([
       '0.2.1',
       '0.2.2',
       '0.3.0'
     ])
     expect(installedPanelVersions('0 extension(s) installed', 'Asset Library')).toEqual([])
-    expect(installedPanelVersions(list('1.0.0'), 'Asset Lib')).toEqual([])
+    expect(installedPanelVersions(list(['1.0.0']), 'Asset Lib')).toEqual([])
   })
 
   it('says why it failed in one line', () => {
@@ -94,16 +99,20 @@ describe('versions', () => {
     expect(compareVersions('2.0.0', '1.99.99')).toBeGreaterThan(0)
   })
 
-  it('picks the newest bundled panel file and ignores anything else', () => {
+  it('picks the newest bundled file of each kind and ignores anything else', () => {
     expect(
-      bundledPanelFile([
+      bundledPanelFiles([
         'Asset-Library-Premiere-0.3.9.ccx',
         'Asset-Library-Premiere-0.3.14.ccx',
+        'Asset-Library-Premiere-CEP-0.4.0.zxp',
         'notes.txt',
         'Other-1.0.0.ccx'
       ])
-    ).toEqual({ name: 'Asset-Library-Premiere-0.3.14.ccx', version: '0.3.14' })
-    expect(bundledPanelFile([])).toBeNull()
+    ).toEqual([
+      { kind: 'cep', name: 'Asset-Library-Premiere-CEP-0.4.0.zxp', version: '0.4.0' },
+      { kind: 'uxp', name: 'Asset-Library-Premiere-0.3.14.ccx', version: '0.3.14' }
+    ])
+    expect(bundledPanelFiles([])).toEqual([])
   })
 
   it('installs unless exactly the bundled version is there', () => {
@@ -118,26 +127,33 @@ describe('versions', () => {
 function installer(
   options: {
     installed?: string[]
+    installedCep?: string[]
     agent?: boolean
     bundled?: string[] | null
     installOutput?: string
     platform?: NodeJS.Platform
   } = {}
-): { installer: PanelInstaller; calls: string[][]; installed: string[] } {
+): {
+  installer: PanelInstaller
+  calls: string[][]
+  installed: string[]
+  installedCep: string[]
+} {
   const installed = [...(options.installed ?? [])]
+  const installedCep = [...(options.installedCep ?? [])]
   const calls: string[][] = []
   const run = vi.fn(async (_file: string, args: string[]): Promise<UpiaRun> => {
     calls.push(args)
     const [flag, value] = args
-    if (flag?.endsWith('list')) return { ok: true, output: list(...installed) }
+    if (flag?.endsWith('list')) return { ok: true, output: list(installed, installedCep) }
     if (flag?.endsWith('remove')) {
-      installed.shift()
+      ;(value === 'Asset Library CEP' ? installedCep : installed).shift()
       return { ok: true, output: 'Removal Successful' }
     }
     if (flag?.endsWith('install')) {
       const output = options.installOutput ?? 'Installation Successful'
-      const version = /Premiere-(.+)\.ccx$/.exec(value ?? '')?.[1]
-      if (installSucceeded(output) && version) installed.push(version)
+      const file = /Premiere-(CEP-)?(.+)\.(?:ccx|zxp)$/.exec(value ?? '')
+      if (installSucceeded(output) && file) (file[1] ? installedCep : installed).push(file[2] as string)
       return { ok: installSucceeded(output), output }
     }
     return { ok: false, output: '' }
@@ -153,7 +169,7 @@ function installer(
     exists: (path) => (options.agent ?? true) && path === upiaPath(platform, {}),
     listFiles: () => options.bundled ?? ['Asset-Library-Premiere-0.3.14.ccx']
   }
-  return { installer: new PanelInstaller(deps), calls, installed }
+  return { installer: new PanelInstaller(deps), calls, installed, installedCep }
 }
 
 describe('PanelInstaller', () => {
@@ -211,7 +227,7 @@ describe('PanelInstaller', () => {
     // Already up to date: nothing runs, but it's remembered.
     const current = installer({ installed: ['0.3.14'] })
     expect(await current.installer.installIfNeeded(null, record)).toBeNull()
-    expect(record).toHaveBeenLastCalledWith('0.3.14')
+    expect(record).toHaveBeenLastCalledWith('uxp:0.3.14')
     expect(current.calls).toEqual([['--list', 'all']])
 
     // An older version installed: replaced.
@@ -221,13 +237,40 @@ describe('PanelInstaller', () => {
 
     // Already tried for this build: never again by itself.
     const tried = installer({ installed: ['0.3.0'] })
-    expect(await tried.installer.installIfNeeded('0.3.14', record)).toBeNull()
+    expect(await tried.installer.installIfNeeded('uxp:0.3.14', record)).toBeNull()
     expect(tried.calls).toEqual([])
 
     // Premiere isn't installed yet: try again at a later launch (nothing recorded).
     record.mockClear()
     expect(await installer({ agent: false }).installer.installIfNeeded(null, record)).toBeNull()
     expect(record).not.toHaveBeenCalled()
+  })
+
+  it('installs the CEP build and the UXP build, each under its own name', async () => {
+    const { installer: i, calls, installed, installedCep } = installer({
+      bundled: ['Asset-Library-Premiere-0.4.0.ccx', 'Asset-Library-Premiere-CEP-0.4.0.zxp'],
+      installed: ['0.3.24'],
+      installedCep: []
+    })
+    expect(await i.install()).toMatchObject({ ok: true, version: '0.4.0' })
+    expect(calls.filter(([flag]) => flag === '--remove')).toEqual([
+      ['--remove', 'Asset Library CEP'],
+      ['--remove', 'Asset Library']
+    ])
+    expect(calls.filter(([flag]) => flag === '--install').map(([, file]) => file)).toEqual([
+      nodePath.join('/App/resources', 'premiere-panel', 'Asset-Library-Premiere-CEP-0.4.0.zxp'),
+      nodePath.join('/App/resources', 'premiere-panel', 'Asset-Library-Premiere-0.4.0.ccx')
+    ])
+    expect(installed).toEqual(['0.4.0'])
+    expect(installedCep).toEqual(['0.4.0'])
+    // A build whose CEP panel is missing from Premiere installs by itself, too.
+    const record = vi.fn()
+    const partial = installer({
+      bundled: ['Asset-Library-Premiere-0.4.0.ccx', 'Asset-Library-Premiere-CEP-0.4.0.zxp'],
+      installed: ['0.4.0']
+    })
+    expect(await partial.installer.installIfNeeded(null, record)).toMatchObject({ ok: true })
+    expect(record).toHaveBeenLastCalledWith('cep:0.4.0 uxp:0.4.0')
   })
 
   it('runs one install at a time', async () => {

@@ -1,5 +1,7 @@
-// Puts the Premiere Pro panel (.ccx) where the installer build picks it up, so every app build
-// ships the panel it was built with. Builds and packages the panel first, unless --no-build.
+// Puts the Premiere Pro panel where the installer build picks it up, so every app build ships
+// the panel it was built with: the UXP plugin (.ccx, Premiere 27+) always, and the signed CEP
+// extension (.zxp, Premiere 24–26) when `pnpm sign:cep` has produced one. Builds and packages
+// the UXP panel first, unless --no-build.
 //
 //   node scripts/prepare-panel.mjs            package the panel, then copy it
 //   node scripts/prepare-panel.mjs --no-build copy the .ccx already in apps/premiere-panel/release
@@ -17,8 +19,9 @@ const windows = process.platform === 'win32'
 // pnpm is a .cmd script on Windows, which only starts through a shell.
 const pnpmOptions = { cwd: panel, stdio: 'inherit', shell: windows }
 
-const manifest = JSON.parse(await readFile(join(panel, 'public', 'manifest.json'), 'utf8'))
-const name = `Asset-Library-Premiere-${manifest.version}.ccx`
+const { version } = JSON.parse(await readFile(join(panel, 'package.json'), 'utf8'))
+const name = `Asset-Library-Premiere-${version}.ccx`
+const cepName = `Asset-Library-Premiere-CEP-${version}.zxp`
 
 if (!process.argv.includes('--no-build')) {
   try {
@@ -49,4 +52,9 @@ if (!names.includes(name)) {
 await rm(out, { recursive: true, force: true })
 await mkdir(out, { recursive: true })
 await copyFile(join(release, name), join(out, name))
-console.log(`Bundling the Premiere Pro panel ${manifest.version}`)
+if (names.includes(cepName)) {
+  await copyFile(join(release, cepName), join(out, cepName))
+  console.log(`Bundling the Premiere Pro panel ${version} (UXP and CEP)`)
+} else {
+  console.log(`Bundling the Premiere Pro panel ${version} (UXP only: no signed ${cepName} in release/)`)
+}

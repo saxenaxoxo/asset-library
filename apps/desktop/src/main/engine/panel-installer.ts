@@ -4,9 +4,22 @@ import nodePath from 'path'
 // installer (Unified Plugin Installer Agent, part of Creative Cloud). Pure helpers first, then
 // the installer itself with the process runner and file checks injected, so tests never run it.
 
-/** The bundled panel: release/Asset-Library-Premiere-<version>.ccx, copied into resources. */
+/**
+ * The bundled panels, copied into resources: the CEP extension for Premiere Pro 24–26
+ * (Asset-Library-Premiere-CEP-<version>.zxp) and the UXP plugin for Premiere 27 and later
+ * (Asset-Library-Premiere-<version>.ccx). Adobe's installer handles both kinds.
+ */
 export const BUNDLED_PANEL_FOLDER = 'premiere-panel'
-const BUNDLED_PANEL_NAME = /^Asset-Library-Premiere-(\d+(?:\.\d+){1,3})\.ccx$/
+const BUNDLED_FILES = {
+  cep: /^Asset-Library-Premiere-CEP-(\d+(?:\.\d+){1,3})\.zxp$/,
+  uxp: /^Asset-Library-Premiere-(\d+(?:\.\d+){1,3})\.ccx$/
+} as const
+export type PanelKind = keyof typeof BUNDLED_FILES
+
+/** Adobe's installer lists each build under its own name, so they're managed separately. */
+export function panelNameFor(kind: PanelKind, productName: string): string {
+  return kind === 'cep' ? `${productName} CEP` : productName
+}
 
 /** Where Adobe's installer lives, or null on platforms without one. */
 export function upiaPath(
@@ -32,14 +45,14 @@ export function upiaPath(
 }
 
 export type UpiaCommand =
-  { action: 'install'; ccx: string } | { action: 'remove'; name: string } | { action: 'list' }
+  { action: 'install'; file: string } | { action: 'remove'; name: string } | { action: 'list' }
 
 /** Arguments for the installer: `--install x.ccx` on macOS, `/install x.ccx` on Windows. */
 export function upiaArgs(platform: NodeJS.Platform, command: UpiaCommand): string[] {
   const flag = (name: string): string => (platform === 'win32' ? `/${name}` : `--${name}`)
   switch (command.action) {
     case 'install':
-      return [flag('install'), command.ccx]
+      return [flag('install'), command.file]
     case 'remove':
       return [flag('remove'), command.name]
     case 'list':
@@ -52,18 +65,19 @@ export function installSucceeded(output: string): boolean {
   return /installation\s+successful/i.test(output)
 }
 
-const VERSION = /\d+(?:\.\d+){1,3}/g
+const VERSION = '\\d+(?:\\.\\d+){1,3}'
 
-/** Every version of the panel `--list all` shows (old versions can be installed side by side). */
+/**
+ * Every version of the named panel `--list all` shows (old versions can be installed side by
+ * side). The version must follow the name directly, so "Asset Library" never matches the line
+ * for "Asset Library CEP".
+ */
 export function installedPanelVersions(listOutput: string, name: string): string[] {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const named = new RegExp(`(^|\\s)${escaped}(\\s|$)`, 'i')
+  const named = new RegExp(`(?:^|\\s)${escaped}\\s+(${VERSION})(?:\\s|$)`, 'i')
   const versions: string[] = []
   for (const line of listOutput.split(/\r?\n/)) {
-    const at = line.search(named)
-    if (at === -1) continue
-    const found = line.slice(at + name.length + 1).match(VERSION)
-    const version = found?.at(-1)
+    const version = named.exec(line)?.[1]
     if (version) versions.push(version)
   }
   return versions
@@ -90,16 +104,25 @@ export function compareVersions(a: string, b: string): number {
   return x.pre < y.pre ? -1 : 1
 }
 
-/** The newest bundled panel among the files in the resources folder, or null. */
-export function bundledPanelFile(
-  names: readonly string[]
-): { name: string; version: string } | null {
-  let best: { name: string; version: string } | null = null
-  for (const name of names) {
-    const version = BUNDLED_PANEL_NAME.exec(name)?.[1]
-    if (version && (!best || compareVersions(version, best.version) > 0)) best = { name, version }
+export interface BundledPanel {
+  kind: PanelKind
+  name: string
+  version: string
+}
+
+/** The newest bundled file of each kind among the files in the resources folder, CEP first. */
+export function bundledPanelFiles(names: readonly string[]): BundledPanel[] {
+  const found: BundledPanel[] = []
+  for (const kind of Object.keys(BUNDLED_FILES) as PanelKind[]) {
+    let best: BundledPanel | null = null
+    for (const name of names) {
+      const version = BUNDLED_FILES[kind].exec(name)?.[1]
+      if (version && (!best || compareVersions(version, best.version) > 0))
+        best = { kind, name, version }
+    }
+    if (best) found.push(best)
   }
-  return best
+  return found
 }
 
 /** Install unless exactly the bundled version is installed (and nothing older beside it). */
@@ -150,19 +173,22 @@ export class PanelInstaller {
 
   constructor(private readonly deps: PanelInstallerDeps) {}
 
-  /** The panel file shipped with this build, or null (development builds have none). */
-  bundled(): { path: string; version: string } | null {
-    const { resourcesDir } = this.deps
-    if (!resourcesDir) return null
+  /** The panel files shipped with this build (none in a development build). */
+  bundled(): (BundledPanel & { path: string; panelName: string })[] {
+    const { resourcesDir, panelName } = this.deps
+    if (!resourcesDir) return []
     const dir = nodePath.join(resourcesDir, BUNDLED_PANEL_FOLDER)
     let names: string[]
     try {
       names = this.deps.listFiles(dir)
     } catch {
-      return null
+      return []
     }
-    const file = bundledPanelFile(names)
-    return file ? { path: nodePath.join(dir, file.name), version: file.version } : null
+    return bundledPanelFiles(names).map((file) => ({
+      ...file,
+      path: nodePath.join(dir, file.name),
+      panelName: panelNameFor(file.kind, panelName)
+    }))
   }
 
   private agent(): string | null {
@@ -170,12 +196,16 @@ export class PanelInstaller {
     return path && this.deps.exists(path) ? path : null
   }
 
-  /** Installed versions of the panel, or null when Adobe's installer isn't there. */
-  async installedVersions(): Promise<string[] | null> {
+  /** Installed versions of each panel kind, or null when Adobe's installer isn't there. */
+  async installedVersions(): Promise<Record<PanelKind, string[]> | null> {
     const agent = this.agent()
     if (!agent) return null
     const listed = await this.deps.run(agent, upiaArgs(this.deps.platform, { action: 'list' }))
-    return installedPanelVersions(listed.output, this.deps.panelName)
+    const { panelName } = this.deps
+    return {
+      cep: installedPanelVersions(listed.output, panelNameFor('cep', panelName)),
+      uxp: installedPanelVersions(listed.output, panelNameFor('uxp', panelName))
+    }
   }
 
   /** Removes any installed copies, then installs the bundled panel. Never throws. */
@@ -187,8 +217,8 @@ export class PanelInstaller {
   }
 
   private async installNow(): Promise<PanelInstallResult> {
-    const bundled = this.bundled()
-    if (!bundled) {
+    const bundles = this.bundled()
+    if (bundles.length === 0) {
       return { ok: false, message: "This copy of the app doesn't include the Premiere Pro panel." }
     }
     const agent = this.agent()
@@ -199,36 +229,42 @@ export class PanelInstaller {
           "Adobe's plug-in installer wasn't found. Install Premiere Pro with the Creative Cloud app, then try again."
       }
     }
-    const { platform, panelName } = this.deps
+    const { platform } = this.deps
     try {
-      // Adobe's installer keeps old versions beside new ones (and Premiere may load an old one),
-      // so every installed copy is removed first.
-      const before = await this.installedVersions()
-      const removals = Math.min(Math.max(before?.length ?? 0, 1), MAX_REMOVALS)
-      for (let i = 0; i < removals; i++) {
-        await this.deps.run(agent, upiaArgs(platform, { action: 'remove', name: panelName }))
-      }
-      const installed = await this.deps.run(
-        agent,
-        upiaArgs(platform, { action: 'install', ccx: bundled.path })
-      )
-      if (!installSucceeded(installed.output)) {
-        return {
-          ok: false,
-          message: `Couldn't install the Premiere Pro panel: ${upiaProblem(installed.output)}`
+      for (const bundle of bundles) {
+        // Adobe's installer keeps old versions beside new ones (and Premiere may load an old
+        // one), so every installed copy of this kind is removed first.
+        const before = await this.installedVersions()
+        const removals = Math.min(Math.max(before?.[bundle.kind].length ?? 0, 1), MAX_REMOVALS)
+        for (let i = 0; i < removals; i++) {
+          await this.deps.run(
+            agent,
+            upiaArgs(platform, { action: 'remove', name: bundle.panelName })
+          )
+        }
+        const installed = await this.deps.run(
+          agent,
+          upiaArgs(platform, { action: 'install', file: bundle.path })
+        )
+        if (!installSucceeded(installed.output)) {
+          return {
+            ok: false,
+            message: `Couldn't install the Premiere Pro panel: ${upiaProblem(installed.output)}`
+          }
+        }
+        const after = await this.installedVersions()
+        if (after && !after[bundle.kind].includes(bundle.version)) {
+          return {
+            ok: false,
+            message: `Adobe's installer finished, but Premiere Pro doesn't list panel ${bundle.version}. Try again.`
+          }
         }
       }
-      const after = await this.installedVersions()
-      if (after && !after.includes(bundled.version)) {
-        return {
-          ok: false,
-          message: `Adobe's installer finished, but Premiere Pro doesn't list panel ${bundled.version}. Try again.`
-        }
-      }
+      const version = bundles[0]?.version ?? ''
       return {
         ok: true,
-        version: bundled.version,
-        message: `Installed the Premiere Pro panel ${bundled.version}. Restart Premiere Pro to use it.`
+        version,
+        message: `Installed the Premiere Pro panel ${version}. Restart Premiere Pro to use it.`
       }
     } catch (error) {
       return {
@@ -248,13 +284,15 @@ export class PanelInstaller {
     lastTried: string | null,
     recordTry: (version: string) => void
   ): Promise<PanelInstallResult | null> {
-    const bundled = this.bundled()
-    if (!bundled || lastTried === bundled.version) return null
+    const bundles = this.bundled()
+    // Every bundled file carries the build's version; the first stands for the set.
+    const version = bundles.map((b) => `${b.kind}:${b.version}`).join(' ')
+    if (bundles.length === 0 || lastTried === version) return null
     const installed = await this.installedVersions()
     // No Adobe installer yet (Premiere not installed): try again at a later launch.
     if (installed === null) return null
-    recordTry(bundled.version)
-    if (!panelNeedsInstall(bundled.version, installed)) return null
+    recordTry(version)
+    if (!bundles.some((b) => panelNeedsInstall(b.version, installed[b.kind]))) return null
     return this.install()
   }
 }
