@@ -55,7 +55,7 @@ mac:
     # The Premiere Pro panel, installed into Premiere by the app (scripts/prepare-panel.mjs).
     - from: .cache/premiere-panel
       to: premiere-panel
-      filter: ['*.ccx']
+      filter: ['*.ccx', '*.zxp']
 dmg:
   artifactName: Asset-Library-${version}-${arch}.${ext}
 
@@ -80,7 +80,7 @@ win:
       filter: ['*.exe', '*.dll', 'BUILD-INFO.txt', 'LICENSE.txt']
     - from: .cache/premiere-panel
       to: premiere-panel
-      filter: ['*.ccx']
+      filter: ['*.ccx', '*.zxp']
 nsis:
   artifactName: Asset-Library-${version}-setup.${ext}
   oneClick: false
