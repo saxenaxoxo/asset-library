@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@catalog/*": [
+        "../../packages/catalog/*"
+      ],
+      "@host/*": [
+        "src/host-cep/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "../../packages/catalog/**/*"
+  ],
+  "exclude": [
+    "src/host-uxp/**",
+    "src/diag.ts",
+    "tests/**"
+  ]
+}

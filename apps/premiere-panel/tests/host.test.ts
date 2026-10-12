@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { storage } from '../src/host'
+import { storage } from '../src/host-uxp/platform'
 
 function setLocalStorage(value: () => unknown): void {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, get: value })

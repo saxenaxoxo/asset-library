@@ -36,21 +36,30 @@ import {
   readText,
   showLocalImage,
   splitPath
-} from './files'
-import { detectWindows, storage } from './host'
-import { placeAtPlayhead, UserError, type InsertOptions } from './premiere'
-import { dragContentType, DRAG_MIN_MAJOR, fileUri, hostMajor, samePath } from './paths'
-import { engineRunning, readEngineStatus, removeRequest, sendRequest, startEngine } from './engine'
+} from '@host/files'
+import {
+  audio,
+  capabilities,
+  claimKeys,
+  detectWindows,
+  makeDraggable,
+  openExternal,
+  startEngine,
+  storage
+} from '@host/platform'
+import { placeAtPlayhead, UserError, type InsertOptions } from '@host/premiere'
+import { samePath } from './paths'
+import { engineRunning, readEngineStatus, removeRequest, sendRequest } from './engine'
 import { installDiagnostics, note } from './diag'
 
 /** Set by the build: true only for a `--diag` build. */
 declare const PANEL_DIAG: boolean
+/** Set by the build from package.json. */
+declare const PANEL_VERSION: string
 
-const uxp = require('uxp')
-/** Whether this Premiere is known to take drags from a panel; the drag is wired regardless. */
-const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
+/** Whether this Premiere takes drags from the panel (the hint mentions it only then). */
+const canDrag = capabilities.drag
 const WINDOWS = detectWindows()
-const PANEL_VERSION = '0.3.24'
 
 const TILE_SIZES = { min: 80, max: 240, default: 120 }
 const TILE_SIZE_CHOICES: [number, string][] = [
@@ -726,18 +735,30 @@ function addTag(asset: CatalogAsset, raw: string): void {
   void request({ type: 'add-tag', id: asset.id, tag: known }, `Tagged ${asset.name} “${known}”.`)
 }
 
-/** Plays an audio asset through the engine (panels can't play sound); again to stop. */
+/** Plays an audio asset: in the panel where the host can, else through the engine. Again stops. */
 function audition(asset: CatalogAsset): void {
   if (asset.kind !== 'audio') return
   if (state.playingId === asset.id) {
     state.playingId = null
     renderGrid()
-    void request({ type: 'stop-audio' }, 'Stopped.')
+    if (audio.stop()) setStatus('Stopped.')
+    else void request({ type: 'stop-audio' }, 'Stopped.')
     return
   }
   state.playingId = asset.id
   renderGrid()
-  void request({ type: 'play-audio', id: asset.id }, `Playing ${asset.name}…`)
+  void audio
+    .play(asset.path, () => {
+      if (state.playingId === asset.id) {
+        state.playingId = null
+        renderGrid()
+        renderFooter()
+      }
+    })
+    .then((played) => {
+      if (played) setStatus(`Playing ${asset.name}…`)
+      else void request({ type: 'play-audio', id: asset.id }, `Playing ${asset.name}…`)
+    })
 }
 
 function removeTag(asset: CatalogAsset, tag: string): void {
@@ -932,23 +953,15 @@ function buildTile(asset: CatalogAsset, box: Layout): TileNode {
 
   tile.addEventListener('click', (event) => select(asset, event))
   tile.addEventListener('dblclick', () => void placeSelection([asset]))
-  makeDraggable(tile, asset)
+  draggable(tile, asset)
   return { node: tile, key: tileKey(asset), size: box, resize }
 }
 
-/** Drag onto Premiere's timeline (Premiere 27+ only). */
-function makeDraggable(node: HTMLElement, asset: CatalogAsset): void {
-  const contentType = dragContentType(asset.name)
-  if (!contentType) return
-  node.setAttribute('draggable', 'true')
-  node.addEventListener('dragstart', (event) => {
-    const payload = {
-      version: '1.0.0',
-      items: [{ name: asset.name, content_type: contentType, uri: fileUri(asset.path) }]
-    }
-    event.dataTransfer?.setData('text/plain', JSON.stringify(payload))
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
-  })
+/** Drag onto Premiere's timeline: the whole selection when the asset is part of it. */
+function draggable(node: HTMLElement, asset: CatalogAsset): void {
+  makeDraggable(node, () =>
+    state.selectedIds.has(asset.id) && state.selectedIds.size > 1 ? selectedAssets() : [asset]
+  )
 }
 
 /** Scrolls the grid so an asset's tile is in view. */
@@ -1378,7 +1391,7 @@ function treeRowNode(item: TreeItem, index: number, width: number): HTMLElement 
   }
   let x = GUTTER + item.depth * 12
   if (item.expandable) {
-    const caret = part(el('span', 'caret', state.expanded.has(item.key) ? '⌄' : '›'), x, 14)
+    const caret = part(el('span', 'caret', state.expanded.has(item.key) ? '▾' : '▸'), x, 14)
     caret.addEventListener('mousedown', (event) => {
       event.stopPropagation()
       toggleExpanded(item.key)
@@ -1408,7 +1421,7 @@ function treeRowNode(item: TreeItem, index: number, width: number): HTMLElement 
     const asset = item.asset
     row.addEventListener('mousedown', () => selectFromTree(asset))
     row.addEventListener('dblclick', () => void placeSelection([asset]))
-    makeDraggable(row, asset)
+    draggable(row, asset)
   } else if (item.key === TAGS_SECTION) {
     row.addEventListener('mousedown', () => toggleExpanded(item.key))
   } else {
@@ -1474,8 +1487,9 @@ function renderTree(rebuild = true): void {
     treeCache.length - 1,
     Math.ceil((scrolled + (treeScroll.clientHeight || 600)) / TREE_ROW) + 6
   )
-  // The host may not report the pane's inner width; leave room for its scrollbar then.
-  const width = Math.max(120, (treeScroll.clientWidth || treeWidth() - SCROLLBAR_PX) - 2)
+  // Premiere's panel runtime counts the scrollbar in clientWidth (a browser doesn't), so rows
+  // always leave room for it; otherwise the count column hides under the bar.
+  const width = Math.max(120, (treeScroll.clientWidth || treeWidth()) - SCROLLBAR_PX - 2)
   setStyle(treeSpacer, 'height', `${treeCache.length * TREE_ROW}px`)
   setStyle(treeSpacer, 'width', `${width}px`)
   const shown = new Set<string>()
@@ -1857,7 +1871,7 @@ function renderSettings(): void {
 /** Opens a web page in the browser (only our own release pages are ever linked). */
 async function openLink(url: string): Promise<void> {
   try {
-    await uxp.shell?.openExternal(url, 'Open the release page')
+    await openExternal(url)
   } catch (error) {
     setStatus(`Couldn't open the page: ${(error as Error).message}`, 'error')
   }
@@ -2254,6 +2268,7 @@ if (PANEL_DIAG)
     grid,
     status: (text) => setStatus(text)
   })
+claimKeys()
 buildControls()
 renderAll()
 void refreshCatalog(true).then(async () => {

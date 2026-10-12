@@ -1,7 +1,6 @@
 // Talking to the background engine: requests go out as files, status comes back in engine.json.
 // The contract lives in packages/catalog/requests.ts.
 import {
-  ENGINE_START_URL,
   ENGINE_STALE_MS,
   ENGINE_STATUS_FILE,
   parseEngineStatus,
@@ -18,9 +17,7 @@ import {
   readText,
   splitPath,
   writeText
-} from './files'
-
-const uxp = require('uxp')
+} from '@host/files'
 
 /** Sends a request to the engine. Returns its id, to match the result in engine.json later. */
 export async function sendRequest(catalogPath: string, request: PanelRequest): Promise<string> {
@@ -55,15 +52,4 @@ export async function readEngineStatus(catalogPath: string): Promise<EngineStatu
 
 export function engineRunning(status: EngineStatus | null, now = Date.now()): boolean {
   return status !== null && now - status.updatedAt < ENGINE_STALE_MS
-}
-
-/** Asks the OS to start the engine (it registers the assetlibrary:// scheme). */
-export async function startEngine(): Promise<boolean> {
-  try {
-    if (!uxp.shell) return false
-    await uxp.shell.openExternal(ENGINE_START_URL, 'Start the Asset Library engine')
-    return true
-  } catch {
-    return false
-  }
 }

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest Version="11.0" ExtensionBundleId="com.saxenascreation.assetlibrary.cep" ExtensionBundleVersion="__VERSION__" ExtensionBundleName="Asset Library" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ExtensionList>
+    <Extension Id="com.saxenascreation.assetlibrary.cep.panel" Version="__VERSION__"/>
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList>
+      <Host Name="PPRO" Version="[22.0,99.9]"/>
+    </HostList>
+    <LocaleList>
+      <Locale Code="All"/>
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="11.0"/>
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.saxenascreation.assetlibrary.cep.panel">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <ScriptPath>./host.jsx</ScriptPath>
+          <CEFCommandLine>
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>Asset Library</Menu>
+          <Geometry>
+            <Size>
+              <Height>640</Height>
+              <Width>380</Width>
+            </Size>
+            <MinSize>
+              <Height>320</Height>
+              <Width>260</Width>
+            </MinSize>
+            <MaxSize>
+              <Height>2400</Height>
+              <Width>2000</Width>
+            </MaxSize>
+          </Geometry>
+          <Icons>
+            <Icon Type="Normal">./icons/panel-dark@1x.png</Icon>
+            <Icon Type="RollOver">./icons/panel-dark@1x.png</Icon>
+            <Icon Type="DarkNormal">./icons/panel-dark@1x.png</Icon>
+            <Icon Type="DarkRollOver">./icons/panel-dark@1x.png</Icon>
+          </Icons>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>

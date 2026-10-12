@@ -1,8 +1,8 @@
 // Reading the catalog and media from disk. UXP's file APIs differ between hosts and versions,
 // so each read tries the documented options in order and remembers what worked.
 import { catalogPath, parseCatalog, type Catalog } from '@catalog/types'
-import { detectWindows, storage } from './host'
-import { fileUrl, homeFromDataFolder } from './paths'
+import { detectWindows, storage } from './platform'
+import { fileUrl, homeFromDataFolder } from '../paths'
 
 const uxp = require('uxp')
 const fs = require('fs')

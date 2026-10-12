@@ -1,22 +1,15 @@
 // Everything that talks to Premiere Pro. Kept small so it's easy to verify in the host.
 import type { FolderItem, ProjectItem } from '@adobe/premierepro'
 import type { CatalogAsset } from '@catalog/types'
-import { detectWindows } from './host'
-import { samePath } from './paths'
+import { detectWindows } from './platform'
+import { samePath } from '../paths'
+import { UserError, type InsertOptions } from '../placing'
+
+export { UserError, type InsertOptions }
 
 const ppro = require('premierepro')
 const BIN_NAME = 'Asset Library'
 const WINDOWS = detectWindows()
-
-/** A problem the editor can fix (shown as-is in the panel). */
-export class UserError extends Error {}
-
-export interface InsertOptions {
-  /** 0-based: 0 = V1. An index past the last track makes Premiere add a track. */
-  videoTrack: number
-  audioTrack: number
-  mode: 'overwrite' | 'insert'
-}
 
 async function findBin(root: FolderItem): Promise<FolderItem | null> {
   for (const item of await root.getItems()) {

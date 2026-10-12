@@ -4,7 +4,7 @@
 // What it probes: which element kinds get mouse events inside the folder tree pane (none did in
 // Premiere 26) compared with the toolbar, three alternative pane structures, and what
 // `elementFromPoint` reports across the panel.
-import { joinPath, splitPath, writeText } from './files'
+import { joinPath, splitPath, writeText } from '@host/files'
 
 interface DiagContext {
   catalogPath(): string | null
