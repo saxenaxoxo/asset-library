@@ -116,7 +116,9 @@ export function makeDraggable(node: HTMLElement, assets: () => CatalogAsset[]): 
 
 /** Sound can't be played by a UXP panel: the engine does it. */
 export const audio = {
-  play(_path: string, _onEnd: () => void): Promise<boolean> {
+  play(path: string, onEnd: () => void): Promise<boolean> {
+    void path
+    void onEnd
     return Promise.resolve(false)
   },
   stop(): boolean {
@@ -124,5 +126,6 @@ export const audio = {
   }
 }
 
-/** UXP panels receive their own keys; nothing to claim. */
-export function claimKeys(): void {}
+export function claimKeys(): void {
+  // UXP panels receive their own keys; nothing to claim.
+}

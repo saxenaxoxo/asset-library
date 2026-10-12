@@ -10,6 +10,8 @@ export default defineConfig(
     ignores: [
       '**/node_modules',
       '**/dist',
+      '**/dist-cep',
+      '**/tools',
       '**/out',
       '**/test-results',
       '**/release',

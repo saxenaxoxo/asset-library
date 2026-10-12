@@ -17,17 +17,16 @@ const certificate = join(tools, 'asset-library-cep.p12')
 const password = process.env.ZXP_CERT_PASSWORD ?? 'asset-library-dev'
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 
-const exists = (path) => access(path).then(() => true, () => false)
-if (!(await exists(signer))) {
+if (!(await access(signer).then(() => true, () => false))) {
   console.error(`ZXPSignCmd not found at ${signer}. Download it from Adobe's CEP-Resources and put it there.`)
   process.exit(1)
 }
-if (!(await exists(dist))) {
+if (!(await access(dist).then(() => true, () => false))) {
   console.error('No dist-cep/. Run "pnpm build:cep" first.')
   process.exit(1)
 }
 await mkdir(tools, { recursive: true })
-if (!(await exists(certificate))) {
+if (!(await access(certificate).then(() => true, () => false))) {
   execFileSync(signer, [
     '-selfSignedCert', 'IN', 'Delhi', 'Saxenas Creation', 'Asset Library', password, certificate
   ], { stdio: 'inherit' })

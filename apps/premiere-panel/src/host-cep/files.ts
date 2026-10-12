@@ -112,7 +112,8 @@ export async function loadCatalog(path: string): Promise<Catalog> {
 }
 
 /** Shows a local image: Chromium loads file: URLs from a panel served from disk. */
-export function showLocalImage(img: HTMLImageElement, path: string, _mime: string): void {
+export function showLocalImage(img: HTMLImageElement, path: string, mime: string): void {
+  void mime // Chromium works the type out itself; the UXP build needs it for blob fallbacks.
   img.onerror = () => img.classList.add('broken')
   img.src = fileUrl(path)
 }
