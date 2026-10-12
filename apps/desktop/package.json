@@ -18,8 +18,8 @@
     "icons": "node scripts/build-icons.mjs",
     "check": "pnpm typecheck && pnpm test",
     "postinstall": "electron-builder install-app-deps",
-    "dist:mac": "electron-vite build && electron-builder --mac",
-    "dist:win": "electron-vite build && electron-builder --win"
+    "dist:mac": "electron-vite build && electron-builder --mac --publish never",
+    "dist:win": "electron-vite build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
