@@ -1056,7 +1056,10 @@ function renderEmpty(): void {
     return
   }
   if (state.folder === RECENT_KEY && state.view === 'folders') {
-    renderMessage('Nothing placed yet', 'Assets you add to the timeline show up here, newest first.')
+    renderMessage(
+      'Nothing placed yet',
+      'Assets you add to the timeline show up here, newest first.'
+    )
     return
   }
   if (state.favoritesOnly || state.kind !== 'all') {
@@ -1516,7 +1519,8 @@ function renderTree(rebuild = true): void {
     entry.node.remove()
     treeRows.delete(key)
   }
-  if (PANEL_DIAG && built > 0) note(`tree rows ${first}-${last}: ${built} built, ${treeRows.size} kept`)
+  if (PANEL_DIAG && built > 0)
+    note(`tree rows ${first}-${last}: ${built} built, ${treeRows.size} kept`)
 }
 
 let treeFrame = 0
@@ -1699,7 +1703,8 @@ function checkRow(label: string, on: boolean, toggle: () => void): HTMLElement {
 
 function engineWords(): string {
   const engine = state.engine
-  if (!engineRunning(engine)) return "Not running. Thumbnails, imports and edits wait until it's started."
+  if (!engineRunning(engine))
+    return "Not running. Thumbnails, imports and edits wait until it's started."
   if ((engine?.indexing.rootIds.length ?? 0) > 0)
     return `Indexing ${(engine?.indexing.filesSeen ?? 0).toLocaleString()} files…`
   if (engine && engine.pendingMedia > 0)
@@ -1832,7 +1837,10 @@ function renderSettings(): void {
         'Clear',
         'small',
         () =>
-          void request({ type: 'clear-cache' }, 'Clearing previews. They rebuild in the background.')
+          void request(
+            { type: 'clear-cache' },
+            'Clearing previews. They rebuild in the background.'
+          )
       )
     )
     previews.append(cache)
@@ -1898,7 +1906,10 @@ function selectedAssets(): CatalogAsset[] {
 }
 
 /** A click on a tile: plain selects it, shift extends to it, ctrl/cmd adds or removes it. */
-function select(asset: CatalogAsset, event?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): void {
+function select(
+  asset: CatalogAsset,
+  event?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }
+): void {
   if (state.selectedId !== asset.id) state.editingTag = false
   const order = state.visible.map((a) => a.id)
   if (event?.shiftKey) {
@@ -2079,7 +2090,8 @@ function renderFooter(): void {
   const pending = engine?.pendingMedia ?? 0
   mediaTotal = pending === 0 ? 0 : Math.max(mediaTotal, pending)
   let working = ''
-  if (indexing) working = `Indexing… ${(engine?.indexing.filesSeen ?? 0).toLocaleString()} files found`
+  if (indexing)
+    working = `Indexing… ${(engine?.indexing.filesSeen ?? 0).toLocaleString()} files found`
   else if (pending > 0) working = `Making previews · ${pending.toLocaleString()} to go`
   show(progressBar, state.tab === 'library' && pending > 0 && !state.status)
   progressFill.style.width = `${mediaTotal > 0 ? Math.round(((mediaTotal - pending) / mediaTotal) * 100) : 0}%`

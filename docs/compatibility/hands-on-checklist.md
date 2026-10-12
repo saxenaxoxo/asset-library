@@ -2,8 +2,8 @@
 
 Things automated tests can't prove, to check by hand in the real apps. Use a scratch project and
 sequence; nothing here changes your files, but drops and inserts do change the open project.
-Record ✅ / ❌ (with what happened) next to each line, and copy results into `drag-out.md` and
-`premiere-panel.md` in this folder.
+Record ✅ / ❌ (with what happened) next to each line, and copy results into `drag-out.md` in this folder
+and the "What the panel can and can't do" section of `docs/premiere-panel.md`.
 
 ## 1. Desktop app (10 min)
 

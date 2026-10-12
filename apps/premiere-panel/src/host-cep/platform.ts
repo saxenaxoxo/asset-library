@@ -89,7 +89,7 @@ export function allowedLink(url: string): boolean {
 
 /** Opens a web page, or the engine's start link, through the OS. */
 export async function openExternal(url: string): Promise<void> {
-  if (!allowedLink(url)) throw new Error('That link can\'t be opened from the panel.')
+  if (!allowedLink(url)) throw new Error("That link can't be opened from the panel.")
   const util = cep.cep?.util
   if (util) {
     const { err } = util.openURLInDefaultBrowser(url)
@@ -165,7 +165,10 @@ export const audio = {
         if (settled) onEnd()
       })
       element.src = fileUrl(path)
-      element.play().then(() => settle(true), () => settle(false))
+      element.play().then(
+        () => settle(true),
+        () => settle(false)
+      )
     })
   },
   /** Returns true when something was playing. */

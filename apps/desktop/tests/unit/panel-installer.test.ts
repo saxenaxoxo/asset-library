@@ -35,8 +35,12 @@ const list = (
       `${versions.length + cepVersions.length} extensions installed for Premiere Pro (ver ${host})`,
       ' Status                        Extension Name                         Version',
       '=========  =======================================================  ==========',
-      ...versions.map((v) => ` Enabled    Asset Library                                               ${v}`),
-      ...cepVersions.map((v) => ` Enabled    Asset Library CEP                                           ${v}`),
+      ...versions.map(
+        (v) => ` Enabled    Asset Library                                               ${v}`
+      ),
+      ...cepVersions.map(
+        (v) => ` Enabled    Asset Library CEP                                           ${v}`
+      ),
       ' Enabled    Some Other Panel                                             9.9.9',
       ''
     ]),
@@ -178,7 +182,8 @@ function installer(
     if (flag?.endsWith('install')) {
       const output = options.installOutput ?? 'Installation Successful'
       const file = /Premiere-(CEP-)?(.+)\.(?:ccx|zxp)$/.exec(value ?? '')
-      if (installSucceeded(output) && file) (file[1] ? installedCep : installed).push(file[2] as string)
+      if (installSucceeded(output) && file)
+        (file[1] ? installedCep : installed).push(file[2] as string)
       return { ok: installSucceeded(output), output }
     }
     return { ok: false, output: '' }
@@ -287,7 +292,12 @@ describe('PanelInstaller', () => {
     expect(await none.installer.installIfNeeded(null, record)).toBeNull()
     expect(record).not.toHaveBeenCalled()
     // Premiere 26 and 27 side by side: both builds, each under its own name.
-    const { installer: i, calls, installed, installedCep } = installer({
+    const {
+      installer: i,
+      calls,
+      installed,
+      installedCep
+    } = installer({
       bundled: both,
       installed: ['0.3.24'],
       installedCep: [],
@@ -305,7 +315,11 @@ describe('PanelInstaller', () => {
     expect(installed).toEqual(['0.4.0'])
     expect(installedCep).toEqual(['0.4.0'])
     // A build whose CEP panel is missing from Premiere installs by itself, too.
-    const partial = installer({ bundled: both, installed: ['0.4.0'], premiere: ['26.5.2', '27.0.0'] })
+    const partial = installer({
+      bundled: both,
+      installed: ['0.4.0'],
+      premiere: ['26.5.2', '27.0.0']
+    })
     expect(await partial.installer.installIfNeeded(null, record)).toMatchObject({ ok: true })
     expect(record).toHaveBeenLastCalledWith('cep:0.4.0 uxp:0.4.0')
   })

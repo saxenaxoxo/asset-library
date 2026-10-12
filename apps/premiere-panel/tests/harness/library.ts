@@ -1,7 +1,14 @@
 // A small library on disk for the harness: a catalog with three assets and real thumbnails
 // (made with the bundled FFmpeg), under a temporary home folder.
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -18,7 +25,18 @@ export const FFMPEG = join(
 )
 
 function thumb(file: string, source: string): string {
-  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', source, '-frames:v', '1', file])
+  execFileSync(FFMPEG, [
+    '-loglevel',
+    'error',
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    source,
+    '-frames:v',
+    '1',
+    file
+  ])
   return file
 }
 
@@ -115,7 +133,11 @@ export function createLibrary(): TestLibrary {
     requestIds,
     requests: () =>
       requestIds().map(
-        (id) => JSON.parse(readFileSync(join(requestsDir, `${id}.json`), 'utf8')) as Record<string, unknown>
+        (id) =>
+          JSON.parse(readFileSync(join(requestsDir, `${id}.json`), 'utf8')) as Record<
+            string,
+            unknown
+          >
       ),
     engineStatus: (results = []) =>
       writeFileSync(

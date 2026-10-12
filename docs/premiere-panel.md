@@ -9,10 +9,10 @@ makes the previews), and Premiere Pro **24 or later**.
 The panel comes in two builds from the same code, because Premiere's two extension runtimes differ in
 what a panel may do:
 
-| Premiere Pro | Build | How it's installed | Where it opens |
-| :--- | :--- | :--- | :--- |
-| 24 – 26 | **CEP extension** (`apps/premiere-panel/cep`, `pnpm -C apps/premiere-panel build:cep`) | a signed `.zxp`, or the extension folder itself | **Window → Extensions → Asset Library** |
-| 27 and later | **UXP plugin** (`.ccx`, `pnpm -C apps/premiere-panel package`) | Creative Cloud (double-click the `.ccx`) or Adobe's installer | **Window → UXP Plugins → Asset Library** |
+| Premiere Pro | Build                                                                                  | How it's installed                                            | Where it opens                           |
+| :----------- | :------------------------------------------------------------------------------------- | :------------------------------------------------------------ | :--------------------------------------- |
+| 24 – 26      | **CEP extension** (`apps/premiere-panel/cep`, `pnpm -C apps/premiere-panel build:cep`) | a signed `.zxp`, or the extension folder itself               | **Window → Extensions → Asset Library**  |
+| 27 and later | **UXP plugin** (`.ccx`, `pnpm -C apps/premiere-panel package`)                         | Creative Cloud (double-click the `.ccx`) or Adobe's installer | **Window → UXP Plugins → Asset Library** |
 
 Dragging from the panel onto the timeline needs the CEP build on Premiere 24–26 (Premiere reads drags
 from UXP panels only from 27.0). Everything else works the same in both.

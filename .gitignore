@@ -15,3 +15,6 @@ apps/desktop/resources/ffmpeg/*/*
 !apps/desktop/resources/ffmpeg/*/BUILD-INFO.txt
 !apps/desktop/resources/ffmpeg/*/LICENSE.txt
 apps/premiere-panel/tools
+
+# TypeScript incremental build state
+*.tsbuildinfo

@@ -216,7 +216,12 @@ function rowVariants(ctx: DiagContext): void {
     add('v9-late', ctx.buildRow('V9 late', 0))
     // V13: a plain block built late, into the strip.
     const block = lateBlock('V13 late block')
-    Object.assign(block.style, { position: 'absolute', left: '0px', width: '200px', height: `${ROW}px` })
+    Object.assign(block.style, {
+      position: 'absolute',
+      left: '0px',
+      width: '200px',
+      height: `${ROW}px`
+    })
     add('v13-lateblock', block)
     // V10: the container is emptied and refilled, as the real tree does.
     cleared.textContent = ''
@@ -308,7 +313,9 @@ export function installDiagnostics(ctx: DiagContext): void {
           if (target === lastOver) return
           lastOver = target
         }
-        log(`doc ${type} ${target} @${Math.round((event as MouseEvent).clientX)},${Math.round((event as MouseEvent).clientY)}`)
+        log(
+          `doc ${type} ${target} @${Math.round((event as MouseEvent).clientX)},${Math.round((event as MouseEvent).clientY)}`
+        )
       },
       true
     )

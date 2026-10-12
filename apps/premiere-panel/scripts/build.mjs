@@ -20,7 +20,10 @@ await rm(dist, { recursive: true, force: true })
 await mkdir(dist, { recursive: true })
 await cp(join(root, 'public'), dist, { recursive: true })
 if (cep) {
-  await cp(join(root, 'cep'), dist, { recursive: true, filter: (p) => debug || !p.endsWith('.debug') })
+  await cp(join(root, 'cep'), dist, {
+    recursive: true,
+    filter: (p) => debug || !p.endsWith('.debug')
+  })
   await rm(join(dist, 'manifest.json'), { force: true })
   const manifest = await readFile(join(dist, 'CSXS', 'manifest.xml'), 'utf8')
   await writeFile(join(dist, 'CSXS', 'manifest.xml'), manifest.replaceAll('__VERSION__', version))

@@ -2,21 +2,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@catalog/*": [
-        "../../packages/catalog/*"
-      ],
-      "@host/*": [
-        "src/host-cep/*"
-      ]
+      "@catalog/*": ["../../packages/catalog/*"],
+      "@host/*": ["src/host-cep/*"]
     }
   },
-  "include": [
-    "src/**/*",
-    "tests/cep-host.test.ts",
-    "../../packages/catalog/**/*"
-  ],
-  "exclude": [
-    "src/host-uxp/**",
-    "src/diag.ts"
-  ]
+  "include": ["src/**/*", "tests/cep-host.test.ts", "../../packages/catalog/**/*"],
+  "exclude": ["src/host-uxp/**", "src/diag.ts"]
 }

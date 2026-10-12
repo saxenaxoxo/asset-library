@@ -17,19 +17,38 @@ const certificate = join(tools, 'asset-library-cep.p12')
 const password = process.env.ZXP_CERT_PASSWORD ?? 'asset-library-dev'
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 
-if (!(await access(signer).then(() => true, () => false))) {
-  console.error(`ZXPSignCmd not found at ${signer}. Download it from Adobe's CEP-Resources and put it there.`)
+if (
+  !(await access(signer).then(
+    () => true,
+    () => false
+  ))
+) {
+  console.error(
+    `ZXPSignCmd not found at ${signer}. Download it from Adobe's CEP-Resources and put it there.`
+  )
   process.exit(1)
 }
-if (!(await access(dist).then(() => true, () => false))) {
+if (
+  !(await access(dist).then(
+    () => true,
+    () => false
+  ))
+) {
   console.error('No dist-cep/. Run "pnpm build:cep" first.')
   process.exit(1)
 }
 await mkdir(tools, { recursive: true })
-if (!(await access(certificate).then(() => true, () => false))) {
-  execFileSync(signer, [
-    '-selfSignedCert', 'IN', 'Delhi', 'Saxenas Creation', 'Asset Library', password, certificate
-  ], { stdio: 'inherit' })
+if (
+  !(await access(certificate).then(
+    () => true,
+    () => false
+  ))
+) {
+  execFileSync(
+    signer,
+    ['-selfSignedCert', 'IN', 'Delhi', 'Saxenas Creation', 'Asset Library', password, certificate],
+    { stdio: 'inherit' }
+  )
 }
 const out = join(root, 'release', `Asset-Library-Premiere-CEP-${version}.zxp`)
 await mkdir(dirname(out), { recursive: true })
@@ -37,9 +56,13 @@ await rm(out, { force: true })
 // A timestamp keeps the signature valid after the certificate expires. ZXPSignCmd 4.1.2 can
 // crash while timestamping on recent macOS; the ZXP is then signed without one.
 try {
-  execFileSync(signer, ['-sign', dist, out, certificate, password, '-tsa', 'http://timestamp.digicert.com'], {
-    stdio: 'inherit'
-  })
+  execFileSync(
+    signer,
+    ['-sign', dist, out, certificate, password, '-tsa', 'http://timestamp.digicert.com'],
+    {
+      stdio: 'inherit'
+    }
+  )
 } catch {
   console.warn('Timestamping failed; signing without a timestamp.')
   await rm(out, { force: true })

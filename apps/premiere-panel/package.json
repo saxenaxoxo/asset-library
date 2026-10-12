@@ -2,7 +2,7 @@
   "name": "asset-library-premiere-panel",
   "version": "0.4.0",
   "private": true,
-  "description": "Asset Library panel for Adobe Premiere Pro (UXP).",
+  "description": "Asset Library panel for Adobe Premiere Pro (UXP and CEP builds).",
   "license": "UNLICENSED",
   "scripts": {
     "build": "node scripts/build.mjs",

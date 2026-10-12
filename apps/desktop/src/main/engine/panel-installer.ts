@@ -263,7 +263,8 @@ export class PanelInstaller {
       if (premiere.length === 0) {
         return {
           ok: false,
-          message: "Premiere Pro isn't installed on this computer, so there's nowhere to put the panel."
+          message:
+            "Premiere Pro isn't installed on this computer, so there's nowhere to put the panel."
         }
       }
       const wanted = wantedKinds(premiere)

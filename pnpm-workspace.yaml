@@ -1,3 +1,5 @@
+# Only the apps are workspace packages. packages/* are source folders the apps import through path
+# aliases (@brand/*, @catalog/*), so they have no package.json of their own.
 packages:
   - apps/*
 

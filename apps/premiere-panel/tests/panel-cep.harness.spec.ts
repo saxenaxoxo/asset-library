@@ -105,7 +105,12 @@ test('CEP panel places through ExtendScript and drags files the way Premiere exp
   await page.locator('.toolbar .button', { hasText: 'Import' }).click()
   await expect
     .poll(() => library.requests().at(-1))
-    .toEqual({ type: 'import-files', files: ['/Users/me/Downloads/Boom.wav'], rootId: 1, folder: 'SFX' })
+    .toEqual({
+      type: 'import-files',
+      files: ['/Users/me/Downloads/Boom.wav'],
+      rootId: 1,
+      folder: 'SFX'
+    })
 
   // Starting the engine goes through the OS (the assetlibrary:// scheme).
   await page.locator('.tab', { hasText: 'Settings' }).click()

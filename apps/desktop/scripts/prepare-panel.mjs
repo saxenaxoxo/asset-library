@@ -56,5 +56,7 @@ if (names.includes(cepName)) {
   await copyFile(join(release, cepName), join(out, cepName))
   console.log(`Bundling the Premiere Pro panel ${version} (UXP and CEP)`)
 } else {
-  console.log(`Bundling the Premiere Pro panel ${version} (UXP only: no signed ${cepName} in release/)`)
+  console.log(
+    `Bundling the Premiere Pro panel ${version} (UXP only: no signed ${cepName} in release/)`
+  )
 }

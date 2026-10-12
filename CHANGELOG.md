@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Premiere Pro panel 0.3.21 – 0.4.0
+
+- A CEP build of the panel for Premiere Pro 24–26, from the same code as the UXP build: drag assets onto the timeline, double-click or "Add at playhead" to place them. The app installs whichever build each installed Premiere needs.
+- Folder tree clickable in Premiere; counts stay clear of the scrollbar.
+- Multi-select (shift and cmd/ctrl), keyboard navigation, sound preview, type filter, search scope, Recent, and a thumbnail size menu.
+- The panel reads catalog changes instead of reloading the whole catalog.
+
 ### Tested in Premiere Pro 26 and After Effects 26 (macOS)
 
 - Send to After Effects works: it failed in the real app with error -1708 because After Effects' "DoScriptFile" command can't be named when the app is chosen at run time; it now uses the command's raw code.
@@ -39,7 +46,7 @@
 
 - Electron 44 + React 19 + TypeScript + Tailwind 4 app scaffold (electron-vite, electron-builder).
 - Secure by default: sandboxed renderer, context isolation, strict CSP, a typed preload bridge with one method per channel, zod-validated IPC with sender checks, all permission requests denied, navigation and new windows blocked.
-- Replaceable branding module (`branding/`) with a placeholder logo, app icon and purple accent theme.
+- Replaceable branding module (`packages/branding/`) with a placeholder logo, app icon and purple accent theme.
 - App shell: sidebar, search and sort bar, first-run screen with "Add folder", status bar.
 - Unit tests (Vitest) and an end-to-end launch test (Playwright + Electron).
 - Developer tooling: formatting, linting and tests run automatically; repository layout with `apps/` and `packages/`.

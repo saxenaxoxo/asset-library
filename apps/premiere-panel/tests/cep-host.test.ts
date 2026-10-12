@@ -9,7 +9,9 @@ describe('CEP host layer', () => {
     expect(text).not.toMatch(/[\u007f-￿]/)
     expect(text).toBe('"D\\u00fcsseldorf\\u2028\\"); evil() //\\u2029"')
     expect(JSON.parse(text)).toBe(tricky)
-    expect(literal({ path: '/a/b.mov', mogrt: false, n: 2 })).toBe('{"path":"/a/b.mov","mogrt":false,"n":2}')
+    expect(literal({ path: '/a/b.mov', mogrt: false, n: 2 })).toBe(
+      '{"path":"/a/b.mov","mogrt":false,"n":2}'
+    )
   })
 
   it('only opens web pages and the engine start link', () => {

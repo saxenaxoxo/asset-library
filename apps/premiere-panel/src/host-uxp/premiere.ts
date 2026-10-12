@@ -189,10 +189,16 @@ export async function placeAtPlayhead(
     } catch (error) {
       if (done === 0) throw error
       const reason = error instanceof UserError ? error.message : (error as Error).message
-      throw new UserError(`Added ${done} of ${assets.length}, then stopped at ${asset.name}: ${reason}`)
+      throw new UserError(
+        `Added ${done} of ${assets.length}, then stopped at ${asset.name}: ${reason}`
+      )
     }
     done++
-    if (asset.durationMs && asset.durationMs > 0 && typeof sequence.setPlayerPosition === 'function') {
+    if (
+      asset.durationMs &&
+      asset.durationMs > 0 &&
+      typeof sequence.setPlayerPosition === 'function'
+    ) {
       const at = await sequence.getPlayerPosition()
       await sequence.setPlayerPosition(
         ppro.TickTime.createWithSeconds(at.seconds + asset.durationMs / 1000)

@@ -2,3 +2,8 @@ singleQuote: true
 semi: false
 printWidth: 100
 trailingComma: none
+overrides:
+  # ExtendScript (the CEP panel's Premiere side) needs a semicolon after every statement.
+  - files: 'apps/premiere-panel/cep/*.jsx'
+    options:
+      semi: true

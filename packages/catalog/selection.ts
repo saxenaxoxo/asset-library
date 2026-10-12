@@ -4,7 +4,11 @@
  * The IDs between the anchor and the target in `order` (both ends included), as a shift-click
  * selects them. With no anchor in the list, just the target.
  */
-export function rangeBetween(order: readonly string[], anchor: string | null, target: string): string[] {
+export function rangeBetween(
+  order: readonly string[],
+  anchor: string | null,
+  target: string
+): string[] {
   const to = order.indexOf(target)
   if (to === -1) return []
   const from = anchor === null ? -1 : order.indexOf(anchor)
