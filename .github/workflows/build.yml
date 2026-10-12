@@ -71,14 +71,43 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - name: Fetch LGPL FFmpeg
+      # Unit tests on Windows catch path handling (drive letters, backslashes, UNC) that macOS can't.
+      - run: pnpm check
+      - name: Cache FFmpeg download
+        uses: actions/cache@v4
+        with:
+          path: .cache/ffmpeg-win/*.zip
+          key: ffmpeg-win-${{ hashFiles('apps/desktop/scripts/ffmpeg/fetch-windows.sh') }}
+      - name: Fetch LGPL FFmpeg (pinned, checksum-verified)
         shell: bash
         run: apps/desktop/scripts/ffmpeg/fetch-windows.sh
       - run: pnpm dist:win
-      - name: Smoke-test the packaged app
+      - name: Test the unpacked app
         run: pnpm --filter asset-library exec playwright test
         env:
           E2E_EXECUTABLE: ${{ github.workspace }}\apps\desktop\dist\win-unpacked\Asset Library.exe
+      - name: Install with the real installer (silent)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem apps/desktop/dist/*-setup.exe | Select-Object -First 1
+          $dir = "$env:RUNNER_TEMP\AssetLibraryInstall"
+          Start-Process -FilePath $setup.FullName -ArgumentList '/S', "/D=$dir" -Wait
+          foreach ($file in 'Asset Library.exe', 'resources\ffmpeg\ffprobe.exe', 'resources\ffmpeg\LICENSE.txt', 'resources\THIRD_PARTY_NOTICES.md', 'resources\app.asar.unpacked\resources\drag-icon.png') {
+            if (-not (Test-Path (Join-Path $dir $file))) { throw "Installer didn't install $file" }
+          }
+          "INSTALL_DIR=$dir" >> $env:GITHUB_ENV
+      - name: Test the installed app
+        run: pnpm --filter asset-library exec playwright test
+        env:
+          E2E_EXECUTABLE: ${{ env.INSTALL_DIR }}\Asset Library.exe
+      - name: Uninstall (silent)
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "$env:INSTALL_DIR\Uninstall Asset Library.exe" -ArgumentList '/S' -Wait
+          Start-Sleep -Seconds 5
+          if (Test-Path "$env:INSTALL_DIR\Asset Library.exe") { throw 'Uninstaller left the app behind' }
+      - name: Test the Premiere Pro panel on Windows (mocked host)
+        run: pnpm --filter asset-library-premiere-panel test:harness
       - uses: actions/upload-artifact@v4
         with:
           name: asset-library-windows

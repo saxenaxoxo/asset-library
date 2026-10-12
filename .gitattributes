@@ -1,0 +1,6 @@
+# Same line endings on every platform (Windows checkouts would otherwise convert to CRLF,
+# which breaks the bash build scripts).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
