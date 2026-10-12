@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const dist = join(root, 'dist')
 const watch = process.argv.includes('--watch')
+// `--diag` builds in the hit-testing diagnostics (src/diag.ts); never for a release.
+const diag = process.argv.includes('--diag')
 
 await rm(dist, { recursive: true, force: true })
 await mkdir(dist, { recursive: true })
@@ -22,6 +24,7 @@ const options = {
   target: 'es2020',
   external: ['premierepro', 'uxp', 'fs', 'os'],
   alias: { '@catalog': join(root, '..', '..', 'packages', 'catalog') },
+  define: { PANEL_DIAG: String(diag) },
   logLevel: 'info'
 }
 

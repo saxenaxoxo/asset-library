@@ -32,11 +32,15 @@ import { detectWindows, storage } from './host'
 import { insertAtPlayhead, UserError, type InsertOptions } from './premiere'
 import { dragContentType, DRAG_MIN_MAJOR, fileUri, hostMajor, samePath } from './paths'
 import { engineRunning, readEngineStatus, sendRequest, startEngine } from './engine'
+import { installDiagnostics, note } from './diag'
+
+/** Set by the build: true only for a `--diag` build. */
+declare const PANEL_DIAG: boolean
 
 const uxp = require('uxp')
 const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
 const WINDOWS = detectWindows()
-const PANEL_VERSION = '0.3.14'
+const PANEL_VERSION = '0.3.21'
 
 const TILE_SIZES = { min: 80, max: 240, default: 120 }
 const TREE_ROW = 26
@@ -180,7 +184,8 @@ function setDisabled(node: HTMLElement, disabled: boolean): void {
 }
 
 function show(node: HTMLElement, visible: boolean): void {
-  node.style.display = visible ? '' : 'none'
+  const value = visible ? '' : 'none'
+  if (node.style.display !== value) node.style.display = value
 }
 
 const app = document.getElementById('app') as HTMLElement
@@ -883,7 +888,8 @@ function treeVisible(): boolean {
 
 /** The tree's width as a fixed flex size (a plain width on a flex item left it unclickable). */
 function setTreeWidth(width: number): void {
-  treePane.style.width = `${width}px`
+  const value = `${width}px`
+  if (treePane.style.width !== value) treePane.style.width = value
 }
 
 function treeWidth(): number {
@@ -1139,21 +1145,36 @@ function treeRowNode(item: TreeItem, index: number, width: number): HTMLElement 
 }
 
 let treeCache: TreeItem[] = []
-let treeVersion = 0
-let treeRange = ''
+/**
+ * Rows currently in the tree, by item key. Kept across renders, like the grid's tiles: Premiere's
+ * panel runtime asks for many re-layouts in a row, and a row rebuilt between two of them is never
+ * clickable (it's gone before the click lands).
+ */
+const treeRows = new Map<string, { node: HTMLElement; key: string }>()
 
 function isSelectedRow(item: TreeItem): boolean {
   return item.type === 'file' ? item.asset?.id === state.selectedId : state.folder === item.key
 }
 
-/** Updates the highlight on the rows already shown, without rebuilding them. */
-function refreshTreeSelection(): void {
-  for (const node of Array.from(treeSpacer.children) as HTMLElement[]) {
-    const item = treeCache[Number(node.dataset['index'])]
-    if (!item) continue
-    if (isSelectedRow(item)) node.classList.add('selected')
-    else node.classList.remove('selected')
-  }
+/** Everything a row shows; a change rebuilds it. Selection is toggled in place. */
+function rowKey(item: TreeItem, width: number): string {
+  return JSON.stringify([
+    item.type,
+    item.label,
+    item.count,
+    item.icon,
+    item.expandable,
+    item.offline,
+    item.depth,
+    state.expanded.has(item.key),
+    item.asset?.favorite,
+    width
+  ])
+}
+
+/** Writes a style only when it changes: every write is layout work for the panel runtime. */
+function setStyle(node: HTMLElement, property: 'width' | 'height' | 'top', value: string): void {
+  if (node.style[property] !== value) node.style[property] = value
 }
 
 function renderTree(rebuild = true): void {
@@ -1162,38 +1183,48 @@ function renderTree(rebuild = true): void {
   show(splitter, visible)
   if (!visible) return
   setTreeWidth(treeWidth())
-  if (rebuild) {
-    treeCache = treeItems()
-    treeVersion++
-  }
-  // Only the rows in view are built, each placed at an exact position and size (like the grid's
-  // tiles, which Premiere's panel runtime handles reliably).
+  if (rebuild) treeCache = treeItems()
+  // Only the rows in view exist, each placed at an exact position and size.
   const scrolled = Math.max(0, treeScroll.scrollTop - TREE_HEAD)
   const first = Math.max(0, Math.floor(scrolled / TREE_ROW) - 6)
   const last = Math.min(
     treeCache.length - 1,
     Math.ceil((scrolled + (treeScroll.clientHeight || 600)) / TREE_ROW) + 6
   )
-  // Premiere's panel runtime sends scroll events far more often than a browser; rebuilding the
-  // rows each time replaces the row under the mouse mid-click. Rebuild only on real changes.
-  const range = `${first}:${last}:${treeVersion}:${treeScroll.clientWidth}`
-  if (range === treeRange) {
-    refreshTreeSelection()
-    return
-  }
-  treeRange = range
-  treeSpacer.textContent = ''
   const width = Math.max(120, (treeScroll.clientWidth || treeWidth()) - 2)
-  treeSpacer.style.height = `${treeCache.length * TREE_ROW}px`
-  treeSpacer.style.width = `${width}px`
+  setStyle(treeSpacer, 'height', `${treeCache.length * TREE_ROW}px`)
+  setStyle(treeSpacer, 'width', `${width}px`)
+  const shown = new Set<string>()
+  let built = 0
   for (let i = first; i <= last; i++) {
     const item = treeCache[i]
-    if (item) treeSpacer.append(treeRowNode(item, i, width))
+    if (!item) continue
+    const key = rowKey(item, width)
+    let entry = treeRows.get(item.key)
+    if (!entry || entry.key !== key) {
+      entry?.node.remove()
+      entry = { node: treeRowNode(item, i, width), key }
+      treeRows.set(item.key, entry)
+      treeSpacer.append(entry.node)
+      built++
+    }
+    shown.add(item.key)
+    setStyle(entry.node, 'top', `${i * TREE_ROW}px`)
+    if (isSelectedRow(item)) entry.node.classList.add('selected')
+    else entry.node.classList.remove('selected')
   }
+  for (const [key, entry] of treeRows) {
+    if (shown.has(key)) continue
+    entry.node.remove()
+    treeRows.delete(key)
+  }
+  if (PANEL_DIAG && built > 0) note(`tree rows ${first}-${last}: ${built} built, ${treeRows.size} kept`)
 }
 
 let treeFrame = 0
+let treeScrolls = 0
 treeScroll.addEventListener('scroll', () => {
+  if (PANEL_DIAG && ++treeScrolls % 20 === 1) note(`tree scroll events: ${treeScrolls}`)
   if (treeFrame) return
   treeFrame = requestAnimationFrame(() => {
     treeFrame = 0
@@ -1649,7 +1680,9 @@ sizeSlider.addEventListener('input', () => {
   renderGrid()
 })
 
+let renderAlls = 0
 function renderAll(rebuildTree = true): void {
+  if (PANEL_DIAG) note(`renderAll #${++renderAlls} rebuildTree=${rebuildTree}`)
   const library = state.tab === 'library'
   show(header, library)
   show(body, library)
@@ -1689,16 +1722,47 @@ document.addEventListener('keydown', (event) => {
 })
 
 let resizeFrame = 0
+let lastSize = ''
 window.addEventListener('resize', () => {
+  if (PANEL_DIAG) note(`resize app ${app.clientWidth}x${app.clientHeight}`)
   if (resizeFrame) return
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = 0
+    // Premiere's panel runtime reports a resize for layout work the panel itself did, which would
+    // loop forever (re-layout → resize → re-layout…). Only a real change of size needs a new layout.
+    const size = `${app.clientWidth}x${app.clientHeight}`
+    if (size === lastSize && size !== '0x0') return
+    lastSize = size
     renderAll()
   })
 })
 
 // ── Start ───────────────────────────────────────────────────────────────────
 
+if (PANEL_DIAG)
+  installDiagnostics({
+    catalogPath: () => state.catalogPath,
+    body,
+    treePane,
+    treeHead,
+    treeSpacer,
+    buildRow: (label, index) =>
+      treeRowNode(
+        { type: 'folder', key: `diag:${label}`, depth: 1, label, count: 7, expandable: true },
+        index,
+        200
+      ),
+    rebuildMainPane: () => {
+      folderOptionsFor = ''
+      renderToolbar()
+      renderGrid()
+    },
+    splitter,
+    mainPane,
+    toolbar,
+    grid,
+    status: (text) => setStatus(text)
+  })
 buildControls()
 renderAll()
 void refreshCatalog(true).then(async () => {
