@@ -223,3 +223,65 @@ export function mediaPlan(asset: MediaPlanInput): MediaJob[] {
 
   return jobs
 }
+
+/**
+ * Premiere Composer (Mister Horse) keeps a preview for every library file in
+ * `<library>/_Mister Horse Previews/<same path>.webp`: a 320 px still for templates and images,
+ * or a vertical strip of 10 frames for video. We only ever read it.
+ */
+export const PREMIERE_COMPOSER_PREVIEWS = '_Mister Horse Previews'
+
+/** Thumbnail (and, for a frame strip, hover-scrub sprite) made from a Premiere Composer preview. */
+export function externalPreviewPlan(preview: {
+  input: string
+  base: string
+  width: number
+  height: number
+}): MediaJob[] {
+  const { input, base, width, height } = preview
+  const frameHeight = (width * 9) / 16
+  // A strip is ~10 frames tall; anything else is a single picture.
+  const frames = height >= frameHeight * (SPRITE_FRAMES - 0.5) ? SPRITE_FRAMES : 1
+  const tile = Math.floor(height / frames)
+  const thumb = `${base}.thumb.jpg`
+  const jobs: MediaJob[] = [
+    {
+      output: 'thumb',
+      file: thumb,
+      args: [
+        ...COMMON,
+        '-i',
+        input,
+        '-frames:v',
+        '1',
+        '-vf',
+        frames > 1
+          ? `crop=iw:${tile}:0:${tile * Math.floor(frames / 2)},scale='min(${THUMB_WIDTH},iw)':-2`
+          : `scale='min(${THUMB_WIDTH},iw)':-2`,
+        '-q:v',
+        '3',
+        thumb
+      ]
+    }
+  ]
+  if (frames > 1) {
+    const sprite = `${base}.sprite.jpg`
+    jobs.push({
+      output: 'sprite',
+      file: sprite,
+      args: [
+        ...COMMON,
+        '-i',
+        input,
+        '-vf',
+        `crop=iw:${tile * frames}:0:0,untile=1x${frames},scale=${SPRITE_FRAME_WIDTH}:-2:flags=bicubic,setsar=1,tile=${frames}x1`,
+        '-frames:v',
+        '1',
+        '-q:v',
+        '4',
+        sprite
+      ]
+    })
+  }
+  return jobs
+}

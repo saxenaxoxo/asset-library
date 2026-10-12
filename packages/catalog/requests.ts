@@ -63,6 +63,11 @@ export interface EngineStatus {
   importsFolder: string
   /** Newest last, at most 20. */
   results: RequestResult[]
+  /**
+   * `updatedAt` of the last catalog.json written. The panel re-reads the (possibly large)
+   * catalog only when this changes. Older engines omit it.
+   */
+  catalogUpdatedAt?: number
 }
 
 const ASSET_ID = /^[0-9a-f-]{36}$/
@@ -143,7 +148,10 @@ export function parseEngineStatus(text: string): EngineStatus | null {
       settings: data.settings ?? { startAtLogin: true },
       cacheBytes: data.cacheBytes ?? 0,
       importsFolder: data.importsFolder ?? '',
-      results: Array.isArray(data.results) ? data.results : []
+      results: Array.isArray(data.results) ? data.results : [],
+      ...(typeof data.catalogUpdatedAt === 'number'
+        ? { catalogUpdatedAt: data.catalogUpdatedAt }
+        : {})
     }
   } catch {
     return null

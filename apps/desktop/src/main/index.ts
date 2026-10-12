@@ -138,7 +138,8 @@ if (!app.requestSingleInstanceLock()) {
       mediaDir,
       indexing: () => library.indexing(),
       pendingMedia: () => repo.pendingMediaCount(),
-      startAtLogin: () => settings.settings.startAtLogin
+      startAtLogin: () => settings.settings.startAtLogin,
+      catalogUpdatedAt: () => library.catalogUpdatedAt()
     })
     const setStartAtLogin = (enabled: boolean): void => {
       settings.setStartAtLogin(enabled)

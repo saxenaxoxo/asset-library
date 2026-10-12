@@ -21,6 +21,8 @@ export interface StatusSource {
   indexing(): { rootIds: number[]; filesSeen: number }
   pendingMedia(): number
   startAtLogin(): boolean
+  /** `updatedAt` of the last catalog written, or null before the first one. */
+  catalogUpdatedAt?(): number | null
 }
 
 /** Total size of the files directly inside `dir` (the media cache is flat). */
@@ -105,7 +107,10 @@ export class EngineStatusWriter {
       settings: { startAtLogin: this.source.startAtLogin() },
       cacheBytes: this.cacheBytes,
       importsFolder: this.source.importsFolder,
-      results: [...this.results]
+      results: [...this.results],
+      ...(this.source.catalogUpdatedAt?.() != null
+        ? { catalogUpdatedAt: this.source.catalogUpdatedAt() as number }
+        : {})
     }
   }
 

@@ -19,6 +19,7 @@ import {
 import type { EngineStatus, PanelRequest } from '@catalog/requests'
 import {
   chooseCatalog,
+  fileMissing,
   loadCatalog,
   locateCatalog,
   mimeFor,
@@ -35,7 +36,7 @@ import { engineRunning, readEngineStatus, sendRequest, startEngine } from './eng
 const uxp = require('uxp')
 const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
 const WINDOWS = detectWindows()
-const PANEL_VERSION = '0.2.0'
+const PANEL_VERSION = '0.2.2'
 
 const TILE_MIN = 104
 const GAP = 8
@@ -285,6 +286,10 @@ const EMPTY_CATALOG = (): Catalog => ({
   assets: []
 })
 
+/** Without any change signal, the catalog is re-read at most this often. */
+const BLIND_READ_MS = 15_000
+let lastBlindRead = 0
+
 /** Bumped by every refresh; a refresh whose number is no longer current drops its result. */
 let refreshGeneration = 0
 let refreshesInFlight = 0
@@ -303,9 +308,23 @@ async function loadLatestCatalog(run: number, force: boolean): Promise<void> {
     renderAll()
     return
   }
-  const mtime = await modifiedTime(path)
+  // The catalog can be many MB, so only read it when it has changed: the engine says when it
+  // last wrote one, else the file's modified time, else every so often.
+  const cue = engineRunning(state.engine) ? state.engine?.catalogUpdatedAt : undefined
+  const mtime = cue === undefined ? await modifiedTime(path) : null
   if (stale(path)) return
-  if (mtime === null) {
+  if (!force && state.catalog && state.catalog.updatedAt !== 0) {
+    if (cue !== undefined && cue === state.catalog.updatedAt) return
+    if (cue === undefined && mtime !== null && mtime === state.catalogMtime) return
+    if (cue === undefined && mtime === null && Date.now() - lastBlindRead < BLIND_READ_MS) return
+  }
+  if (mtime === null && cue === undefined) lastBlindRead = Date.now()
+  let catalog: Catalog
+  try {
+    catalog = await loadCatalog(path)
+  } catch (error) {
+    if (stale(path)) return
+    if (!(await fileMissing(path))) throw error
     // No catalog yet: the engine hasn't run. Show an empty library the editor can start filling.
     if (!state.catalog || state.catalog.updatedAt !== 0 || force) {
       state.catalog = EMPTY_CATALOG()
@@ -314,8 +333,6 @@ async function loadLatestCatalog(run: number, force: boolean): Promise<void> {
     }
     return
   }
-  if (!force && mtime === state.catalogMtime) return
-  const catalog = await loadCatalog(path)
   if (stale(path)) return
   // Remember the time even when nothing changed, so the next poll doesn't parse it again.
   state.catalogMtime = mtime
@@ -571,7 +588,7 @@ function buildTile(asset: CatalogAsset, box: Layout): HTMLElement {
   }
 
   // Hover-scrub: slide the sprite strip so the frame under the cursor shows.
-  if (asset.kind === 'video' && asset.sprite) {
+  if ((asset.kind === 'video' || asset.kind === 'template') && asset.sprite) {
     const sprite = el('img', 'sprite')
     sprite.style.width = `${box.tileWidth * SPRITE_FRAMES}px`
     sprite.style.height = `${box.thumbHeight}px`

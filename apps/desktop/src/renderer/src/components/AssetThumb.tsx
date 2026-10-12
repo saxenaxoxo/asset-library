@@ -36,7 +36,11 @@ export function AssetThumb({
         ? mediaUrl(asset, 'thumb')
         : null
   const broken = still !== null && still === brokenUrl
-  const canScrub = scrub && asset.kind === 'video' && asset.media.sprite && !unavailable
+  const canScrub =
+    scrub &&
+    (asset.kind === 'video' || asset.kind === 'template') &&
+    asset.media.sprite &&
+    !unavailable
 
   function onMove(event: React.MouseEvent<HTMLDivElement>): void {
     if (!canScrub) return

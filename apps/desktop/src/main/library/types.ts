@@ -49,4 +49,6 @@ export interface PendingMedia {
   height: number | null
   /** Short content key; changes when the file changes, so cached media is never stale. */
   key: string
+  /** Where Premiere Composer would keep this file's preview (may not exist). */
+  externalPreview: string | null
 }

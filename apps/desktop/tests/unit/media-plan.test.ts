@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { h264Encoder, mediaPlan, type MediaPlanInput } from '../../src/main/media/plan'
+import {
+  externalPreviewPlan,
+  h264Encoder,
+  mediaPlan,
+  type MediaPlanInput
+} from '../../src/main/media/plan'
 
 const base: MediaPlanInput = {
   kind: 'video',
@@ -80,5 +85,28 @@ describe('mediaPlan', () => {
     expect(sprite.args.filter((arg) => arg === base.input)).toHaveLength(10)
     expect(sprite.args.join(' ')).toContain('hstack=inputs=10')
     expect(sprite.args.at(-1)).toBe('id-key.sprite.jpg')
+  })
+
+  it('turns a Premiere Composer frame strip into a thumbnail and a scrub sprite', () => {
+    const jobs = externalPreviewPlan({
+      input: '/L/_Mister Horse Previews/a.mov.webp',
+      base: 'id-k',
+      width: 320,
+      height: 1800
+    })
+    expect(jobs.map((j) => j.output)).toEqual(['thumb', 'sprite'])
+    expect(jobs[0]!.args.join(' ')).toContain('crop=iw:180:0:900')
+    expect(jobs[1]!.args.join(' ')).toContain('untile=1x10')
+    expect(jobs.every((j) => !j.file.includes('/'))).toBe(true)
+  })
+
+  it('uses a single Premiere Composer still as the thumbnail only', () => {
+    const jobs = externalPreviewPlan({
+      input: '/L/x.mogrt.webp',
+      base: 'id-k',
+      width: 320,
+      height: 180
+    })
+    expect(jobs.map((j) => j.output)).toEqual(['thumb'])
   })
 })

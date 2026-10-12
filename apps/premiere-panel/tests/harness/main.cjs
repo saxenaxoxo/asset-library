@@ -3,6 +3,10 @@
 const { app, BrowserWindow } = require('electron')
 const path = require('path')
 
+// A fresh profile per run, so remembered settings (folder, view) never leak between tests.
+if (process.env.HARNESS_HOME)
+  app.setPath('userData', path.join(process.env.HARNESS_HOME, 'profile'))
+
 app.whenReady().then(() => {
   const window = new BrowserWindow({
     width: 380,

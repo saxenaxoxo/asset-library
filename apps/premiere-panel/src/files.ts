@@ -33,12 +33,44 @@ export async function readText(path: string): Promise<string> {
 }
 
 /** Modification time in ms, or null if the file can't be checked (caller falls back to polling). */
+/** A time from whatever shape this host's file API returns (ms number, Date, or string). */
+function toMs(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (value instanceof Date) return value.getTime()
+  if (typeof value === 'string') {
+    const ms = Date.parse(value)
+    return Number.isNaN(ms) ? null : ms
+  }
+  if (value && typeof (value as Date).getTime === 'function') return (value as Date).getTime()
+  return null
+}
+
 export async function modifiedTime(path: string): Promise<number | null> {
   try {
-    const info = await fs.lstat(path)
-    return info.mtimeMs ?? info.mtime?.getTime() ?? null
+    const info = (await fs.lstat(path)) as Record<string, unknown>
+    const ms = toMs(info['mtimeMs']) ?? toMs(info['mtime'])
+    if (ms !== null) return ms
+  } catch {
+    // try the entry API
+  }
+  try {
+    const entry = (await lfs.getEntryWithUrl(fileUrl(path))) as unknown as {
+      getMetadata?: () => Promise<{ dateModified?: unknown }>
+    }
+    return toMs((await entry.getMetadata?.())?.dateModified)
   } catch {
     return null
+  }
+}
+
+/** True when nothing exists at `path` (as opposed to a file this host can't check). */
+export async function fileMissing(path: string): Promise<boolean> {
+  try {
+    await readText(path)
+    return false
+  } catch (error) {
+    const text = String((error as Error)?.message ?? error).toLowerCase()
+    return /not ?found|no such file|enoent|does not exist|cannot find/.test(text)
   }
 }
 
@@ -143,7 +175,7 @@ export async function loadCatalog(path: string): Promise<Catalog> {
   try {
     text = await readText(path)
   } catch {
-    throw new Error('No library found yet. Open the Asset Library app and add a folder.')
+    throw new Error("Couldn't read your library's catalog. Try again, or choose it in Settings.")
   }
   return parseCatalog(text)
 }

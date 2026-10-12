@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import nodePath from 'path'
 import type { Statement } from 'better-sqlite3'
 import type { LibraryDatabase } from './database'
+import { PREMIERE_COMPOSER_PREVIEWS } from '../media/plan'
 import { extensionOf, kindForFile, type AssetKind } from '@shared/media-types'
 import type {
   AssetQuery,
@@ -492,8 +493,8 @@ export class LibraryRepository {
         `select a.id, a.rel_path, a.kind, a.has_alpha, a.duration_ms, a.width, a.height, a.fingerprint,
            r.path as root_path
          from assets a join roots r on r.id = a.root_id
-         where a.media_state = 'pending' and a.probe_state != 'pending' and a.status = 'ok'
-           and r.status = 'ok' and a.kind != 'template'
+         where a.media_state = 'pending' and a.status = 'ok' and r.status = 'ok'
+           and (a.probe_state != 'pending' or a.kind = 'template')
          order by a.favorite desc, a.added_at desc limit ?`
       )
       .all(limit) as {
@@ -519,10 +520,27 @@ export class LibraryRepository {
           durationMs: row.duration_ms,
           width: row.width,
           height: row.height,
-          key: mediaKey(row.fingerprint)
+          key: mediaKey(row.fingerprint),
+          externalPreview: safeJoin(
+            row.root_path,
+            `${PREMIERE_COMPOSER_PREVIEWS}/${row.rel_path}.webp`
+          )
         }
       ]
     })
+  }
+
+  /**
+   * Templates and images that ended up without a thumbnail get another try (a Premiere Composer
+   * preview may exist now). Returns how many were queued.
+   */
+  retryMissingThumbnails(): number {
+    return this.db
+      .prepare(
+        `update assets set media_state = 'pending'
+         where media_state != 'pending' and thumb_file is null and kind in ('template', 'image')`
+      )
+      .run().changes
   }
 
   /** Saves generated media, unless the file changed meanwhile (its key no longer matches). */

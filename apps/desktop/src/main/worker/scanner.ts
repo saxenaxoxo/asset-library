@@ -15,7 +15,9 @@ const SKIPPED_DIRECTORIES = new Set([
   'Adobe Premiere Pro Video Previews',
   'Adobe Premiere Pro Audio Previews',
   'Media Cache',
-  'Media Cache Files'
+  'Media Cache Files',
+  // Premiere Composer / Mister Horse keeps its own preview renders here.
+  '_Mister Horse Previews'
 ])
 
 const FINGERPRINT_CHUNK = 64 * 1024

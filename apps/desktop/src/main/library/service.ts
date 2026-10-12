@@ -5,7 +5,7 @@ import type { RootRecord, ScanProgress } from '@shared/library'
 import { parseProbe } from '../media/probe'
 import type { MediaBinaries } from '../media/binaries'
 import { WorkerError, type WorkerClient } from '../worker/client'
-import { mediaPlan } from '../media/plan'
+import { externalPreviewPlan, mediaPlan } from '../media/plan'
 import { buildCatalog, writeCatalog } from '../catalog/writer'
 
 export type LibraryEvent =
@@ -50,6 +50,7 @@ export class LibraryService {
   private catalogDirty = false
   private catalogUrgent = false
   private lastCatalogAt = 0
+  private lastCatalogUpdatedAt: number | null = null
   private cleaning = false
   /** Set on quit. After this, late results from the worker are ignored: the database is closing. */
   private stopped = false
@@ -71,9 +72,15 @@ export class LibraryService {
     this.catalogTimer = null
   }
 
+  /** `updatedAt` of the last catalog this engine wrote (the panel's cue to re-read it). */
+  catalogUpdatedAt(): number | null {
+    return this.lastCatalogUpdatedAt
+  }
+
   /** Call once at start-up: tidies up after a crash, then refreshes every root in the background. */
   start(): void {
     this.repo.recoverInterruptedScans()
+    this.repo.retryMissingThumbnails()
     for (const root of this.repo.listRoots()) void this.rescan(root.id)
     void this.probePending()
     this.scheduleCatalog()
@@ -270,13 +277,26 @@ export class LibraryService {
               base,
               platform: process.platform
             })
-            const files = await this.worker.request({
-              type: 'media',
-              ffmpegPath: this.binaries.ffmpeg,
-              outDir: this.paths.mediaDir,
-              jobs
-            })
+            let files =
+              jobs.length > 0
+                ? await this.worker.request({
+                    type: 'media',
+                    ffmpegPath: this.binaries.ffmpeg,
+                    outDir: this.paths.mediaDir,
+                    jobs
+                  })
+                : {}
             if (this.stopped) return
+            // Nothing we could render (templates, PSDs): use Premiere Composer's preview if any.
+            if (!files.thumb && asset.externalPreview) {
+              const borrowed = await this.borrowPreview(asset.externalPreview, base)
+              if (this.stopped) return
+              files = {
+                ...files,
+                thumb: borrowed.thumb ?? null,
+                sprite: files.sprite ?? borrowed.sprite ?? null
+              }
+            }
             // The cache was cleared while this ran: its files may be gone. It's made again.
             if (epoch !== this.mediaEpoch) continue
             this.repo.saveMedia(asset.id, asset.key, {
@@ -300,6 +320,30 @@ export class LibraryService {
     }
     // Regenerated assets leave their old files behind; sweep once the queue is drained.
     if (generated > 0 && !this.stopped) void this.cleanupMedia()
+  }
+
+  /** Makes our thumbnail (and scrub strip) from a Premiere Composer preview, if there is one. */
+  private async borrowPreview(
+    path: string,
+    base: string
+  ): Promise<{ thumb?: string | null; sprite?: string | null }> {
+    try {
+      const info = await stat(path)
+      if (!info.isFile()) return {}
+      const probe = parseProbe(
+        await this.worker.request({ type: 'probe', ffprobePath: this.binaries.ffprobe, path }),
+        'image'
+      )
+      if (!probe.width || !probe.height) return {}
+      return await this.worker.request({
+        type: 'media',
+        ffmpegPath: this.binaries.ffmpeg,
+        outDir: this.paths.mediaDir,
+        jobs: externalPreviewPlan({ input: path, base, width: probe.width, height: probe.height })
+      })
+    } catch {
+      return {} // no preview there, or it couldn't be read: the asset just has no thumbnail
+    }
   }
 
   /**
@@ -389,7 +433,9 @@ export class LibraryService {
       try {
         const catalog = buildCatalog(this.repo, this.paths.mediaDir, this.paths.appVersion)
         this.catalogWriting = writeCatalog(this.paths.catalogDir, catalog)
-          .then(() => undefined)
+          .then(() => {
+            this.lastCatalogUpdatedAt = catalog.updatedAt
+          })
           .catch(() => undefined)
           .finally(() => {
             this.catalogWriting = null

@@ -57,6 +57,7 @@ describe('scanRoot', () => {
     file('._a.mp4')
     file('$RECYCLE.BIN/b.mp4')
     file('Media Cache Files/c.mov')
+    file('_Mister Horse Previews/Graphics/d.mp4')
     file('keep.mp4')
     expect((await scanAll()).map((e) => e.relPath)).toEqual(['keep.mp4'])
   })
