@@ -135,9 +135,9 @@ body {
 /* Folder tree: folders and files, like Premiere Composer's Browse panel. */
 .tree {
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--panel);
 }
 
@@ -145,7 +145,9 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 6px 6px 4px 10px;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 6px 0 10px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -157,22 +159,10 @@ body {
   text-transform: uppercase;
 }
 
-.tree-scroll {
-  flex: 1;
-  position: relative;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
 .tree-row {
   position: absolute;
   left: 0;
-  right: 0;
   height: 26px;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding-right: 8px;
   border-bottom: 1px solid #0d0d10;
   color: var(--ink-2);
   cursor: pointer;
@@ -188,10 +178,6 @@ body {
   color: var(--ink);
 }
 
-.tree-row.file {
-  color: var(--ink-2);
-}
-
 .tree-row.selected {
   background: var(--brand-surface);
   color: var(--brand-200);
@@ -201,9 +187,17 @@ body {
   color: var(--ink-3);
 }
 
+/* Parts of a row are placed at exact spots by the panel code. */
+.tree-row > span {
+  position: absolute;
+  top: 0;
+  height: 26px;
+  line-height: 26px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
 .gutter {
-  width: 20px;
-  flex-shrink: 0;
   text-align: center;
   font-size: 11px;
   color: #2c2a35;
@@ -217,23 +211,15 @@ body {
   color: var(--brand-400);
 }
 
-.indent {
-  flex-shrink: 0;
-}
-
 .caret {
-  width: 14px;
-  flex-shrink: 0;
   color: var(--ink-3);
   font-size: 12px;
   text-align: center;
 }
 
-.type-icon {
-  width: 16px;
+.tree-row > .type-icon {
+  top: 5px;
   height: 16px;
-  margin-right: 6px;
-  flex-shrink: 0;
   background-size: 16px 16px;
   background-repeat: no-repeat;
 }
@@ -259,27 +245,19 @@ body {
 }
 
 .tree-icon {
-  width: 16px;
-  margin-right: 6px;
-  flex-shrink: 0;
   color: var(--brand-400);
   font-size: 11px;
   text-align: center;
 }
 
 .tree-label {
-  flex-grow: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .tree-count {
-  flex-shrink: 0;
-  margin-left: 6px;
   color: var(--ink-3);
   font-size: 10px;
+  text-align: right;
 }
 
 .splitter {
@@ -326,11 +304,23 @@ body {
 .crumbs {
   flex: 1;
   min-width: 0;
-  margin-left: 4px;
+  margin-left: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--ink);
+}
+
+.folder-select {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+  padding: 3px 4px;
+  font-size: 11px;
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
 }
 
 .crumb.link {

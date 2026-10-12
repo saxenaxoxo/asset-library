@@ -173,8 +173,11 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await page.locator('.tree-row.folder', { hasText: 'SFX' }).click()
   await expect(tiles).toHaveCount(1)
   await expect(page.locator('.tree-row.file', { hasText: 'Whoosh Big.wav' })).toBeVisible()
-  await expect(page.locator('.crumbs')).toContainText('SSD')
-  await expect(page.locator('.crumbs')).toContainText('SFX')
+  await expect(page.locator('.folder-select')).toHaveValue('1/SFX')
+  // The toolbar's folder menu goes anywhere too.
+  await page.selectOption('.folder-select', '1/Overlays')
+  await expect(tiles).toHaveCount(1)
+  await expect(page.locator('.tile', { hasText: 'Light Leak.mov' })).toBeVisible()
   await page.locator('.tree-row', { hasText: 'Favorites' }).click()
   await expect(tiles).toHaveCount(1)
   await page.locator('.tree-row', { hasText: 'All assets' }).click()

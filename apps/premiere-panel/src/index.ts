@@ -36,7 +36,7 @@ import { engineRunning, readEngineStatus, sendRequest, startEngine } from './eng
 const uxp = require('uxp')
 const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
 const WINDOWS = detectWindows()
-const PANEL_VERSION = '0.3.1'
+const PANEL_VERSION = '0.3.14'
 
 const TILE_SIZES = { min: 80, max: 240, default: 120 }
 const TREE_ROW = 26
@@ -204,15 +204,31 @@ header.append(favoritesToggle, search)
 const body = el('div', 'body')
 const treePane = el('div', 'tree')
 const treeHead = el('div', 'tree-head')
-const treeScroll = el('div', 'tree-scroll')
+// The tree pane scrolls itself, header included (one scroll box, as in the 0.2 panel: Premiere's
+// panel runtime didn't deliver clicks into a scroll box nested in a column layout here).
+const treeScroll = treePane
 const treeSpacer = el('div')
 treeSpacer.style.position = 'relative'
-treeScroll.append(treeSpacer)
-treePane.append(treeHead, treeScroll)
+treePane.append(treeHead, treeSpacer)
+const TREE_HEAD = 31
 const splitter = el('div', 'splitter', '⋮')
 splitter.title = 'Drag to resize'
 const mainPane = el('div', 'main')
 const toolbar = el('div', 'toolbar')
+// Built once and only updated: Premiere's panel runtime gives elements added later inside
+// this nested layout no size, so they draw but can't be clicked.
+const treeToggle = el('div', 'icon-button', '☰')
+const upButton = el('div', 'icon-button', '‹')
+upButton.title = 'Up one folder'
+const crumbs = el('div', 'crumbs')
+const importButton = el('div', 'button', 'Import')
+// A folder picker: a native menu, which Premiere's panel runtime reliably sends clicks to.
+const folderSelect = el('select', 'folder-select')
+folderSelect.setAttribute('aria-label', 'Folder')
+toolbar.append(treeToggle, upButton, folderSelect, importButton)
+const addFolderButton = el('div', 'button small', '+ Folder')
+addFolderButton.title = 'Add a folder to your library'
+treeHead.append(el('span', 'tree-title', 'Library'), addFolderButton)
 const grid = el('div', 'grid')
 mainPane.append(toolbar, grid)
 body.append(treePane, splitter, mainPane)
@@ -282,7 +298,7 @@ function scopeAssets(): CatalogAsset[] {
  * Recomputes the visible assets. `resetScroll` is for the editor's own changes (search, filter,
  * folder); background catalog updates keep the scroll position.
  */
-function applyFilter(resetScroll: boolean): void {
+function applyFilter(resetScroll: boolean, rebuildTree = true): void {
   state.visible = filterAssets(scopeAssets(), {
     text: state.text,
     kind: state.kind === 'favorites' ? 'all' : state.kind,
@@ -293,7 +309,7 @@ function applyFilter(resetScroll: boolean): void {
     state.editingTag = false
   }
   if (resetScroll) grid.scrollTop = 0
-  renderAll()
+  renderAll(rebuildTree)
 }
 
 const EMPTY_CATALOG = (): Catalog => ({
@@ -865,6 +881,11 @@ function treeVisible(): boolean {
   return app.clientWidth === 0 || app.clientWidth >= NARROW_PX
 }
 
+/** The tree's width as a fixed flex size (a plain width on a flex item left it unclickable). */
+function setTreeWidth(width: number): void {
+  treePane.style.width = `${width}px`
+}
+
 function treeWidth(): number {
   const width = app.clientWidth || 380
   const max = Math.max(160, width - 160)
@@ -1020,7 +1041,7 @@ function selectFromTree(asset: CatalogAsset): void {
   state.selectedId = asset.id
   state.editingTag = false
   state.status = null
-  applyFilter(false)
+  applyFilter(false, false)
   scrollGridTo(asset.id)
 }
 
@@ -1028,110 +1049,146 @@ function typeIcon(asset: CatalogAsset): string {
   return asset.kind === 'image' ? 'image' : asset.kind
 }
 
-function treeRowNode(item: TreeItem, index: number): HTMLElement {
-  const selectedRow =
-    item.type === 'file' ? item.asset?.id === state.selectedId : state.folder === item.key
+const COUNT_WIDTH = 34
+
+/** 22845 → "22.8k", so counts fit a narrow tree. */
+function formatCount(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
+  return `${Math.round(n / 1000)}k`
+}
+const GUTTER = 16
+
+/** Places a part of a tree row at an exact spot (no flexbox inside rows; see the toolbar note). */
+function part(node: HTMLElement, left: number, width: number): HTMLElement {
+  node.style.left = `${left}px`
+  node.style.width = `${Math.max(0, width)}px`
+  return node
+}
+
+function treeRowNode(item: TreeItem, index: number, width: number): HTMLElement {
   const row = el(
     'div',
-    `tree-row ${item.type}${selectedRow ? ' selected' : ''}${item.offline ? ' offline' : ''}`
+    `tree-row ${item.type}${isSelectedRow(item) ? ' selected' : ''}${item.offline ? ' offline' : ''}`
   )
+  row.dataset['index'] = String(index)
   row.style.top = `${index * TREE_ROW}px`
-  // An explicit width: Premiere's panel runtime draws left/right-stretched rows but doesn't
-  // let them receive clicks.
-  row.style.width = `${treeRowWidth}px`
+  row.style.width = `${width}px`
+  row.title = item.offline ? `${item.label} isn't connected` : item.label
+
   // Favorite star in the gutter, for files.
-  const gutter = el('span', 'gutter')
   if (item.type === 'file' && item.asset) {
     const asset = item.asset
-    gutter.textContent = '★'
-    if (asset.favorite) gutter.classList.add('on')
+    const gutter = part(el('span', `gutter${asset.favorite ? ' on' : ''}`, '★'), 0, GUTTER)
     gutter.title = asset.favorite ? 'Remove from Favorites' : 'Add to Favorites'
-    gutter.addEventListener('click', (event) => {
+    gutter.addEventListener('mousedown', (event) => {
       event.stopPropagation()
       toggleFavorite(asset)
     })
     gutter.addEventListener('dblclick', (event) => event.stopPropagation())
+    row.append(gutter)
   }
-  row.append(gutter)
-  const indent = el('span', 'indent')
-  indent.style.width = `${item.depth * 14}px`
-  row.append(indent)
-  const caret = el(
-    'span',
-    'caret',
-    item.expandable ? (state.expanded.has(item.key) ? '⌄' : '›') : ''
-  )
+  let x = GUTTER + item.depth * 12
   if (item.expandable) {
-    caret.addEventListener('click', (event) => {
+    const caret = part(el('span', 'caret', state.expanded.has(item.key) ? '⌄' : '›'), x, 14)
+    caret.addEventListener('mousedown', (event) => {
       event.stopPropagation()
       toggleExpanded(item.key)
     })
+    row.append(caret)
   }
-  row.append(caret)
-  if (item.type === 'folder') row.append(el('span', 'type-icon folder'))
+  x += 14
+  if (item.type === 'folder') row.append(part(el('span', 'type-icon folder'), x, 16))
   else if (item.type === 'file' && item.asset)
-    row.append(el('span', `type-icon ${typeIcon(item.asset)}`))
-  else if (item.icon) row.append(el('span', 'tree-icon', item.icon))
-  row.append(el('span', 'tree-label', item.label))
-  if (item.type !== 'file')
+    row.append(part(el('span', `type-icon ${typeIcon(item.asset)}`), x, 16))
+  else if (item.icon) row.append(part(el('span', 'tree-icon', item.icon), x, 16))
+  if (item.type !== 'section' || item.icon) x += 20
+  const hasCount = item.type !== 'file' && (item.offline || item.count !== undefined)
+  row.append(
+    part(el('span', 'tree-label', item.label), x, width - x - (hasCount ? COUNT_WIDTH + 8 : 6))
+  )
+  if (hasCount)
     row.append(
-      el(
-        'span',
-        'tree-count',
-        item.offline ? 'offline' : item.count === undefined ? '' : String(item.count)
+      part(
+        el('span', 'tree-count', item.offline ? 'offline' : formatCount(item.count ?? 0)),
+        width - COUNT_WIDTH - 4,
+        COUNT_WIDTH
       )
     )
-  row.title = item.offline ? `${item.label} isn't connected` : item.label
 
   if (item.type === 'file' && item.asset) {
     const asset = item.asset
-    row.addEventListener('click', () => selectFromTree(asset))
+    row.addEventListener('mousedown', () => selectFromTree(asset))
     row.addEventListener('dblclick', () => void place(asset))
     makeDraggable(row, asset)
   } else if (item.key === TAGS_SECTION) {
-    row.addEventListener('click', () => toggleExpanded(item.key))
+    row.addEventListener('mousedown', () => toggleExpanded(item.key))
   } else {
-    row.addEventListener('click', () => {
-      if (item.expandable && !state.expanded.has(item.key)) {
-        state.expanded.add(item.key)
+    row.addEventListener('mousedown', () => {
+      // A click opens the folder; clicking the open folder again folds it.
+      if (item.expandable) {
+        if (!state.expanded.has(item.key)) state.expanded.add(item.key)
+        else if (state.folder === item.key) state.expanded.delete(item.key)
         state.expandedSaved = true
         save(KEYS.expanded, [...state.expanded])
       }
       openFolder(item.key, false)
     })
-    if (item.expandable) row.addEventListener('dblclick', () => toggleExpanded(item.key))
   }
   return row
 }
 
 let treeCache: TreeItem[] = []
-let treeRowWidth = 200
+let treeVersion = 0
+let treeRange = ''
+
+function isSelectedRow(item: TreeItem): boolean {
+  return item.type === 'file' ? item.asset?.id === state.selectedId : state.folder === item.key
+}
+
+/** Updates the highlight on the rows already shown, without rebuilding them. */
+function refreshTreeSelection(): void {
+  for (const node of Array.from(treeSpacer.children) as HTMLElement[]) {
+    const item = treeCache[Number(node.dataset['index'])]
+    if (!item) continue
+    if (isSelectedRow(item)) node.classList.add('selected')
+    else node.classList.remove('selected')
+  }
+}
 
 function renderTree(rebuild = true): void {
   const visible = treeVisible()
   show(treePane, visible)
   show(splitter, visible)
   if (!visible) return
-  treePane.style.width = `${treeWidth()}px`
-  treeRowWidth = treeScroll.clientWidth || treeWidth() - 10
+  setTreeWidth(treeWidth())
   if (rebuild) {
-    treeHead.textContent = ''
-    treeHead.append(
-      el('span', 'tree-title', 'Library'),
-      button('+ Folder', 'small', () => void addFolder(), 'Add a folder to your library')
-    )
     treeCache = treeItems()
+    treeVersion++
   }
-  treeSpacer.style.height = `${treeCache.length * TREE_ROW}px`
-  const first = Math.max(0, Math.floor(treeScroll.scrollTop / TREE_ROW) - 6)
+  // Only the rows in view are built, each placed at an exact position and size (like the grid's
+  // tiles, which Premiere's panel runtime handles reliably).
+  const scrolled = Math.max(0, treeScroll.scrollTop - TREE_HEAD)
+  const first = Math.max(0, Math.floor(scrolled / TREE_ROW) - 6)
   const last = Math.min(
     treeCache.length - 1,
-    Math.ceil((treeScroll.scrollTop + (treeScroll.clientHeight || 600)) / TREE_ROW) + 6
+    Math.ceil((scrolled + (treeScroll.clientHeight || 600)) / TREE_ROW) + 6
   )
+  // Premiere's panel runtime sends scroll events far more often than a browser; rebuilding the
+  // rows each time replaces the row under the mouse mid-click. Rebuild only on real changes.
+  const range = `${first}:${last}:${treeVersion}:${treeScroll.clientWidth}`
+  if (range === treeRange) {
+    refreshTreeSelection()
+    return
+  }
+  treeRange = range
   treeSpacer.textContent = ''
+  const width = Math.max(120, (treeScroll.clientWidth || treeWidth()) - 2)
+  treeSpacer.style.height = `${treeCache.length * TREE_ROW}px`
+  treeSpacer.style.width = `${width}px`
   for (let i = first; i <= last; i++) {
     const item = treeCache[i]
-    if (item) treeSpacer.append(treeRowNode(item, i))
+    if (item) treeSpacer.append(treeRowNode(item, i, width))
   }
 }
 
@@ -1153,7 +1210,7 @@ splitter.addEventListener('mousedown', (event) => {
 document.addEventListener('mousemove', (event) => {
   if (!dragStart) return
   state.treeWidth = dragStart.width + event.clientX - dragStart.x
-  treePane.style.width = `${treeWidth()}px`
+  setTreeWidth(treeWidth())
   renderGrid()
 })
 document.addEventListener('mouseup', () => {
@@ -1167,45 +1224,82 @@ document.addEventListener('mouseup', () => {
 
 // ── Toolbar ─────────────────────────────────────────────────────────────────
 
+function parentKey(key: string): string | null {
+  if (key === ALL_KEY || key.startsWith('*')) return null
+  const slash = key.indexOf('/')
+  const path = key.slice(slash + 1)
+  if (path === '') return ALL_KEY
+  const cut = path.lastIndexOf('/')
+  return `${key.slice(0, slash + 1)}${cut === -1 ? '' : path.slice(0, cut)}`
+}
+
 function renderToolbar(): void {
   show(toolbar, state.view === 'folders')
   if (state.view !== 'folders') return
-  toolbar.textContent = ''
-  const toggle = el('div', 'icon-button', treeVisible() ? '⟨' : '☰')
-  toggle.title = treeVisible() ? 'Hide folders' : 'Show folders'
-  toggle.addEventListener('click', () => {
-    state.treePref = treeVisible() ? 'hidden' : 'shown'
-    save(KEYS.tree, state.treePref)
-    renderAll()
-  })
-  const crumbs = el('div', 'crumbs')
-  const add = (label: string, key: string | null): void => {
-    if (crumbs.childNodes.length > 0) crumbs.append(el('span', 'crumb-sep', '›'))
-    const crumb = el('span', key ? 'crumb link' : 'crumb', label)
-    if (key) crumb.addEventListener('click', () => openFolder(key, false))
-    crumbs.append(crumb)
-  }
-  if (state.folder === ALL_KEY) add('All assets', null)
-  else if (state.folder === FAVORITES_KEY) add('Favorites', null)
-  else if (state.folder.startsWith(TAG_PREFIX))
-    add(`# ${state.folder.slice(TAG_PREFIX.length)}`, null)
-  else if (state.catalog) {
+  treeToggle.textContent = '☰'
+  if (treeVisible()) treeToggle.classList.add('active')
+  else treeToggle.classList.remove('active')
+  treeToggle.title = treeVisible() ? 'Hide folders' : 'Show folders'
+  const up = parentKey(state.folder)
+  setDisabled(upButton, up === null)
+  let label = 'All assets'
+  if (state.folder === FAVORITES_KEY) label = 'Favorites'
+  else if (state.folder.startsWith(TAG_PREFIX)) label = `# ${state.folder.slice(TAG_PREFIX.length)}`
+  else if (state.folder !== ALL_KEY && state.catalog) {
     const trail = folderTrail(buildFolderTree(state.catalog), state.folder)
-    trail.forEach((node, i) => add(node.label, i === trail.length - 1 ? null : node.key))
-    if (trail.length === 0) add('All assets', null)
+    if (trail.length > 0) label = trail.map((node) => node.label).join(' › ')
   }
-  const target = importTarget()
-  toolbar.append(
-    toggle,
-    crumbs,
-    button(
-      'Import',
-      '',
-      () => void importFiles(),
-      `Copy files into ${target.label} and add them to the library`
-    )
-  )
+  crumbs.textContent = label
+  crumbs.title = label
+  renderFolderSelect(label)
+  importButton.title = `Copy files into ${importTarget().label} and add them to the library`
 }
+
+let folderOptionsFor = ''
+
+/** Fills the folder menu (all folders, indented, plus Favorites and tags). */
+function renderFolderSelect(label: string): void {
+  const catalog = state.catalog
+  const signature = `${catalog?.updatedAt ?? 0}:${state.favoriteEdits.size}:${state.tagEdits.size}`
+  if (catalog && signature !== folderOptionsFor) {
+    folderOptionsFor = signature
+    folderSelect.textContent = ''
+    const add = (key: string, text: string): void => {
+      const option = el('option', '', text)
+      option.value = key
+      folderSelect.append(option)
+    }
+    const all = catalog.assets.map(effective)
+    add(ALL_KEY, `All assets (${all.length.toLocaleString()})`)
+    add(FAVORITES_KEY, `★ Favorites (${all.filter((a) => a.favorite).length.toLocaleString()})`)
+    const walk = (node: FolderNode): void => {
+      add(node.key, `${'\u2003'.repeat(node.depth)}${node.label} (${node.count.toLocaleString()})`)
+      for (const child of node.children) walk(child)
+    }
+    for (const root of buildFolderTree({ ...catalog, assets: all })) walk(root)
+    const tags = [...new Set(all.flatMap((a) => a.tags))].sort((a, b) => a.localeCompare(b))
+    for (const tag of tags) add(tagKey(tag), `# ${tag}`)
+  }
+  folderSelect.value = state.folder
+  folderSelect.title = label
+}
+
+folderSelect.addEventListener('change', () => {
+  if (folderSelect.value && folderSelect.value !== state.folder)
+    openFolder(folderSelect.value, false)
+})
+
+treeToggle.addEventListener('click', () => {
+  state.treePref = treeVisible() ? 'hidden' : 'shown'
+  save(KEYS.tree, state.treePref)
+  renderAll()
+})
+upButton.addEventListener('click', () => {
+  const up = parentKey(state.folder)
+  if (up !== null) openFolder(up, false)
+})
+importButton.addEventListener('click', () => void importFiles())
+addFolderButton.addEventListener('click', () => void addFolder())
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
@@ -1555,14 +1649,14 @@ sizeSlider.addEventListener('input', () => {
   renderGrid()
 })
 
-function renderAll(): void {
+function renderAll(rebuildTree = true): void {
   const library = state.tab === 'library'
   show(header, library)
   show(body, library)
   show(settingsPane, !library)
   renderHeader()
   if (library) {
-    renderTree()
+    renderTree(rebuildTree)
     renderToolbar()
     renderGrid()
   } else {
