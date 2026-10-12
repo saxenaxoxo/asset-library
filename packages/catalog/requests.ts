@@ -37,7 +37,8 @@ export type PanelRequest =
    * overwritten; a copy gets " 2", " 3"… before its extension.
    */
   | { type: 'import-files'; files: string[]; rootId?: number; folder?: string }
-  | { type: 'set-settings'; startAtLogin?: boolean }
+  /** `checkForUpdates` was added after the first release; older panels never send it. */
+  | { type: 'set-settings'; startAtLogin?: boolean; checkForUpdates?: boolean }
   /** Delete generated thumbnails and previews; they're rebuilt in the background. */
   | { type: 'clear-cache' }
   /** Play an asset's sound through the computer (panels can't play media). */
@@ -60,7 +61,8 @@ export interface EngineStatus {
   indexing: { rootIds: number[]; filesSeen: number }
   /** Assets still waiting for thumbnails or previews. */
   pendingMedia: number
-  settings: { startAtLogin: boolean }
+  /** `checkForUpdates` (the daily check for a new release) is omitted by older engines. */
+  settings: { startAtLogin: boolean; checkForUpdates?: boolean }
   cacheBytes: number
   /** Where imports without a destination go. */
   importsFolder: string
@@ -73,6 +75,8 @@ export interface EngineStatus {
   catalogUpdatedAt?: number
   /** The full catalog's generation and the delta's seq, so the panel reads only what changed. */
   catalog?: { generation: string; deltaSeq: number }
+  /** A newer release of the app, when the update check found one; `url` is its release page. */
+  update?: { version: string; url: string }
 }
 
 const ASSET_ID = /^[0-9a-f-]{36}$/
@@ -128,10 +132,14 @@ export function parseRequest(text: string): PanelRequest | null {
     }
     case 'set-settings': {
       const login = r['startAtLogin']
+      const updates = r['checkForUpdates']
       if (login !== undefined && typeof login !== 'boolean') return null
-      return login === undefined
-        ? { type: 'set-settings' }
-        : { type: 'set-settings', startAtLogin: login }
+      if (updates !== undefined && typeof updates !== 'boolean') return null
+      return {
+        type: 'set-settings',
+        ...(login === undefined ? {} : { startAtLogin: login }),
+        ...(updates === undefined ? {} : { checkForUpdates: updates })
+      }
     }
     case 'clear-cache':
       return { type: 'clear-cache' }
@@ -165,6 +173,11 @@ export function parseEngineStatus(text: string): EngineStatus | null {
       typeof data.catalog.generation === 'string' &&
       typeof data.catalog.deltaSeq === 'number'
         ? { catalog: { generation: data.catalog.generation, deltaSeq: data.catalog.deltaSeq } }
+        : {}),
+      ...(data.update &&
+      typeof data.update.version === 'string' &&
+      typeof data.update.url === 'string'
+        ? { update: { version: data.update.version, url: data.update.url } }
         : {})
     }
   } catch {

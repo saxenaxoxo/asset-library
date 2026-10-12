@@ -52,6 +52,10 @@ mac:
     - from: resources/ffmpeg/darwin-${arch}
       to: ffmpeg
       filter: ['ffmpeg', 'ffprobe', 'BUILD-INFO.txt', 'LICENSE.txt']
+    # The Premiere Pro panel, installed into Premiere by the app (scripts/prepare-panel.mjs).
+    - from: .cache/premiere-panel
+      to: premiere-panel
+      filter: ['*.ccx']
 dmg:
   artifactName: Asset-Library-${version}-${arch}.${ext}
 
@@ -74,6 +78,9 @@ win:
     - from: resources/ffmpeg/win32-${arch}
       to: ffmpeg
       filter: ['*.exe', '*.dll', 'BUILD-INFO.txt', 'LICENSE.txt']
+    - from: .cache/premiere-panel
+      to: premiere-panel
+      filter: ['*.ccx']
 nsis:
   artifactName: Asset-Library-${version}-setup.${ext}
   oneClick: false

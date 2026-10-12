@@ -1,11 +1,12 @@
-import { app, BrowserWindow, dialog, nativeTheme } from 'electron'
+import { app, dialog, nativeTheme, net, shell } from 'electron'
+import { execFile } from 'child_process'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { applySecurityPolicies, isTrustedSenderUrl } from './security'
-import { createMainWindow, RENDERER_INDEX } from './window'
+import { createMainWindow, mainWindow, RENDERER_INDEX } from './window'
 import { registerIpcHandlers } from './ipc'
-import { copyFileSync, existsSync } from 'fs'
+import { copyFileSync, existsSync, readdirSync } from 'fs'
 import { openDatabase } from './library/database'
 import { migrate, needsMigration } from './library/migrations'
 import { LibraryRepository } from './library/repository'
@@ -21,6 +22,13 @@ import { EngineStatusWriter, statusLine } from './engine/status'
 import { SettingsStore } from './engine/settings'
 import { electronLoginItem, openedAtLogin } from './engine/login-item'
 import { EngineTray } from './engine/tray'
+import { AudioPlayer } from './engine/audio-player'
+import { PanelInstaller, type UpiaRun } from './engine/panel-installer'
+import { UpdateChecker } from './engine/update-check'
+import { isAllowedExternalUrl } from './security-rules'
+import { CatalogPublisher, readCatalogSnapshot } from './catalog/writer'
+import { workerCatalogPublishing } from './catalog/publishing'
+import { AUDIO_PAGE } from '@shared/audio-preview'
 import {
   BACKGROUND_FLAG,
   ENGINE_SCHEME,
@@ -34,17 +42,36 @@ const rendererFileUrlPrefix = pathToFileURL(RENDERER_INDEX).href
 
 registerAssetScheme()
 
+/** Opens the library window. The Dock icon goes away with it (the engine keeps running). */
+function openMainWindow(): void {
+  createMainWindow(devServerUrl).on('closed', () => {
+    if (!mainWindow()) app.dock?.hide()
+  })
+}
+
 /** Shows the library window (creating it if it was closed) and, on macOS, the Dock icon. */
 function showWindow(): void {
-  const [window] = BrowserWindow.getAllWindows()
+  const window = mainWindow()
   if (window) {
     if (window.isMinimized()) window.restore()
     window.show()
     window.focus()
   } else {
-    createMainWindow(devServerUrl)
+    openMainWindow()
   }
   void app.dock?.show()
+}
+
+/** Runs a program with an argument array (no shell) and collects its output. Never rejects. */
+function runProgram(file: string, args: string[]): Promise<UpiaRun> {
+  return new Promise((resolve) => {
+    execFile(
+      file,
+      args,
+      { timeout: 120_000, windowsHide: true, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => resolve({ ok: !error, output: `${stdout ?? ''}\n${stderr ?? ''}` })
+    )
+  })
 }
 
 /** assetlibrary://start only makes sure the engine runs (it does now); …://open shows the window. */
@@ -120,57 +147,143 @@ if (!app.requestSingleInstanceLock()) {
     )
     settings.init()
     handleAssetProtocol(repo, mediaDir)
+    const appVersion = app.getVersion()
+    // The catalog is built and written in the utility process (it's big for big libraries).
+    const localCatalog = new CatalogPublisher({ catalogDir, appVersion })
+    const publishCatalog = workerCatalogPublishing({
+      worker,
+      request: { dbFile, catalogDir, mediaDir, appVersion },
+      local: (full) => localCatalog.publish(() => readCatalogSnapshot(repo, mediaDir), full)
+    })
+    // Assigned below; a catalog write tells the panel through engine.json right away.
+    let status: EngineStatusWriter | null = null
     const library = new LibraryService(
       repo,
       worker,
       binaries,
-      { mediaDir, catalogDir, appVersion: app.getVersion() },
-      (event) => {
-        for (const window of BrowserWindow.getAllWindows()) {
-          window.webContents.send(LIBRARY_EVENT_CHANNEL, event)
-        }
-      }
+      { mediaDir, catalogDir, appVersion },
+      (event) => mainWindow()?.webContents.send(LIBRARY_EVENT_CHANNEL, event),
+      { publishCatalog, onCatalog: () => void status?.write() }
+    )
+    const updates = new UpdateChecker({
+      appVersion,
+      fetch: (url, init) => net.fetch(url, init),
+      enabled: () => settings.checkForUpdates,
+      state: () => settings.updateCheck,
+      record: (at, latest) => settings.recordUpdateCheck(at, latest),
+      onChange: () => void status?.write()
+    })
+    const panelInstaller = new PanelInstaller({
+      platform: process.platform,
+      env: process.env,
+      resourcesDir: app.isPackaged ? process.resourcesPath : null,
+      panelName: productName,
+      run: runProgram,
+      exists: existsSync,
+      listFiles: (dir) => readdirSync(dir)
+    })
+    const audio = new AudioPlayer(
+      devServerUrl
+        ? new URL(AUDIO_PAGE, devServerUrl).href
+        : pathToFileURL(join(__dirname, '../renderer', AUDIO_PAGE)).href
     )
     // Tells the Premiere panel the engine is alive, what it's doing, and how requests went.
-    const status = new EngineStatusWriter(catalogDir, {
-      version: app.getVersion(),
+    const engineStatus = new EngineStatusWriter(catalogDir, {
+      version: appVersion,
       importsFolder,
       mediaDir,
       indexing: () => library.indexing(),
       pendingMedia: () => repo.pendingMediaCount(),
       startAtLogin: () => settings.settings.startAtLogin,
-      catalogUpdatedAt: () => library.catalogUpdatedAt()
+      catalogUpdatedAt: () => library.catalogUpdatedAt(),
+      catalog: () => library.catalogVersion(),
+      checkForUpdates: () => settings.checkForUpdates,
+      update: () => updates.available()
     })
+    status = engineStatus
     const setStartAtLogin = (enabled: boolean): void => {
       settings.setStartAtLogin(enabled)
-      void status.write()
+      void engineStatus.write()
+    }
+    const setCheckForUpdates = (enabled: boolean): void => {
+      settings.setCheckForUpdates(enabled)
+      if (enabled) void updates.checkIfDue()
+      void engineStatus.write()
     }
     const handler = new RequestHandler(library, repo, {
       productName,
       importsFolder,
-      setStartAtLogin
+      setStartAtLogin,
+      setCheckForUpdates,
+      audio
     })
     // The Premiere panel asks for things (add a folder, import files…) through files.
     const panelRequests = new PanelRequests(catalogDir, {
       handle: (id, request) => handler.handle(id, request),
       unreadable: (id) => handler.unreadable(id),
       report: (result) => {
-        status.invalidateCacheSize()
-        status.record(result)
+        engineStatus.invalidateCacheSize()
+        engineStatus.record(result)
       }
     })
+
+    let trayLine = 'Starting…'
+    let installingPanel = false
+    const refreshTray = (): void =>
+      tray.update({
+        line: trayLine,
+        startAtLogin: settings.settings.startAtLogin,
+        update: updates.available(),
+        canInstallPanel: !installingPanel
+      })
+    const installPanel = async (): Promise<void> => {
+      installingPanel = true
+      refreshTray()
+      const result = await panelInstaller.install()
+      installingPanel = false
+      refreshTray()
+      // In the background the engine has no window; bring the answer to the front.
+      app.focus({ steal: true })
+      void dialog.showMessageBox({
+        type: result.ok ? 'info' : 'warning',
+        message: result.ok ? 'Premiere Pro panel installed' : "The panel wasn't installed",
+        detail: result.message
+      })
+    }
     const tray = new EngineTray(productName, {
       openWindow: showWindow,
       setStartAtLogin,
+      installPanel: () => void installPanel(),
+      openUpdate: (url) => {
+        if (isAllowedExternalUrl(url)) void shell.openExternal(url)
+      },
       quit: () => app.quit()
     })
-    tray.update('Starting…', settings.settings.startAtLogin)
-    status.onStatus((current) => tray.update(statusLine(current), current.settings.startAtLogin))
+    refreshTray()
+    engineStatus.onStatus((current) => {
+      trayLine = statusLine(current)
+      refreshTray()
+    })
 
+    // Quitting removes engine.json, so the panel shows "not running" at once. The status write
+    // in progress (if any) is awaited first, or it would put the file back.
+    let quitting = false
+    app.on('before-quit', (event) => {
+      if (quitting) return
+      quitting = true
+      event.preventDefault()
+      panelRequests.stop()
+      audio.destroy()
+      updates.stop()
+      void engineStatus.shutdown().finally(() => app.quit())
+    })
     app.on('will-quit', () => {
       // Order matters: stop scheduling work, stop the worker, then close the database.
       panelRequests.stop()
-      status.stop()
+      engineStatus.stop()
+      engineStatus.removeFile()
+      audio.destroy()
+      updates.stop()
       tray.destroy()
       library.stop()
       worker.stop()
@@ -191,19 +304,29 @@ if (!app.requestSingleInstanceLock()) {
       url: launchUrl
     })
     if (background) app.dock?.hide()
-    else createMainWindow(devServerUrl)
+    else openMainWindow()
     ready = true
     if (launchUrl && !background) handleEngineUrl(launchUrl)
     library.start()
     panelRequests.start()
-    status.start()
+    engineStatus.start()
+    // Installed builds only: development and test runs never reach the network or Premiere.
+    if (app.isPackaged && !process.env['ASSET_LIBRARY_NO_UPDATE_CHECK']) updates.start()
+    if (app.isPackaged && !process.env['ASSET_LIBRARY_NO_PANEL_INSTALL']) {
+      // First launch of a new build: put its panel into Premiere Pro, replacing older copies.
+      void panelInstaller
+        .installIfNeeded(settings.panelAutoInstalled, (version) =>
+          settings.recordPanelAutoInstall(version)
+        )
+        .catch(() => undefined)
+    }
     // Automated tests point the app at a fixture folder (there's no way to drive the OS folder picker).
     const testRoot = process.env['ASSET_LIBRARY_TEST_ROOT']
     if (testRoot && repo.listRoots().length === 0) void library.addRoot(testRoot)
 
     // Clicking the Dock icon, or opening the app again from Finder, brings the window back.
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) showWindow()
+      if (!mainWindow()) showWindow()
     })
   })
 

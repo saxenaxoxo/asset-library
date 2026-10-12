@@ -11,11 +11,14 @@ let userDataDir: string
 
 function launch(): Promise<ElectronApplication> {
   const executablePath = process.env['E2E_EXECUTABLE']
-  // NO_LOGIN_ITEM: a test run must never add the app under test to the login items.
+  // NO_LOGIN_ITEM: a test run must never add the app under test to the login items. Nor
+  // install its panel into Premiere Pro or check for updates (installed builds do both).
   const env = {
     ...process.env,
     ASSET_LIBRARY_TEST_ROOT: libraryDir,
-    ASSET_LIBRARY_NO_LOGIN_ITEM: '1'
+    ASSET_LIBRARY_NO_LOGIN_ITEM: '1',
+    ASSET_LIBRARY_NO_PANEL_INSTALL: '1',
+    ASSET_LIBRARY_NO_UPDATE_CHECK: '1'
   }
   return electron.launch(
     executablePath

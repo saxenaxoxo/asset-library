@@ -24,8 +24,16 @@ export interface RequestEnvironment {
   importsFolder: string
   /** Turns the login item on or off and remembers the choice. */
   setStartAtLogin(enabled: boolean): void
+  /** Turns the daily update check on or off. Absent: this build has no update check. */
+  setCheckForUpdates?(enabled: boolean): void
+  /** Plays sounds through the computer. Absent: sound preview isn't available. */
+  audio?: {
+    play(id: string): Promise<{ ok: true } | { ok: false; problem: string }>
+    stop(): void
+  }
 }
 
+const NO_AUDIO = "Previewing sound from the panel isn't available in this version."
 const MISSING_ASSET = "Couldn't find that asset. It may have been removed from the library."
 
 /** Gives up looking for a free " 2", " 3"… name after this many. */
@@ -166,15 +174,25 @@ export class RequestHandler {
       case 'import-files':
         return this.importFiles(request.files, request.rootId, request.folder ?? '')
       case 'set-settings': {
-        if (request.startAtLogin === undefined) return [true, 'Settings saved.']
-        this.env.setStartAtLogin(request.startAtLogin)
         const name = this.env.productName
-        return [
-          true,
-          request.startAtLogin
-            ? `${name} will start when you log in.`
-            : `${name} won't start when you log in any more.`
-        ]
+        const messages: string[] = []
+        if (request.startAtLogin !== undefined) {
+          this.env.setStartAtLogin(request.startAtLogin)
+          messages.push(
+            request.startAtLogin
+              ? `${name} will start when you log in.`
+              : `${name} won't start when you log in any more.`
+          )
+        }
+        if (request.checkForUpdates !== undefined && this.env.setCheckForUpdates) {
+          this.env.setCheckForUpdates(request.checkForUpdates)
+          messages.push(
+            request.checkForUpdates
+              ? `${name} will check for updates once a day.`
+              : `${name} won't check for updates.`
+          )
+        }
+        return [true, messages.length > 0 ? messages.join(' ') : 'Settings saved.']
       }
       case 'clear-cache': {
         const { bytes } = await this.library.clearMedia()
@@ -186,9 +204,29 @@ export class RequestHandler {
         ]
       }
       case 'play-audio':
+        return this.playAudio(request.id)
       case 'stop-audio':
-        return [false, "Previewing sound from the panel isn't available in this version yet."]
+        if (!this.env.audio) return [false, NO_AUDIO]
+        this.env.audio.stop()
+        return [true, 'Stopped the sound']
     }
+  }
+
+  private async playAudio(id: string): Promise<[boolean, string]> {
+    if (!this.env.audio) return [false, NO_AUDIO]
+    const asset = this.repo.getAsset(id)
+    if (!asset) return [false, MISSING_ASSET]
+    if (asset.kind !== 'audio') return [false, `${asset.filename} isn't a sound file.`]
+    if (asset.status === 'offline') {
+      return [false, `${asset.filename} isn't available. Connect its drive and try again.`]
+    }
+    if (asset.status === 'missing') {
+      return [false, `${asset.filename} isn't in its folder any more, so it can't be played.`]
+    }
+    const outcome = await this.env.audio.play(asset.id)
+    return outcome.ok
+      ? [true, `Playing ${asset.filename}`]
+      : [false, `Couldn't play ${asset.filename}: ${outcome.problem}.`]
   }
 
   private async addFolder(path: string): Promise<[boolean, string]> {

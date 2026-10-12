@@ -8,8 +8,14 @@ import { _electron as electron, expect, test, type ElectronApplication } from '@
 function launch(userDataDir: string, ...extra: string[]): Promise<ElectronApplication> {
   const executablePath = process.env['E2E_EXECUTABLE']
   const args = [`--user-data-dir=${userDataDir}`, ...extra]
-  // A test run must never add the app under test to the login items.
-  const env = { ...process.env, ASSET_LIBRARY_NO_LOGIN_ITEM: '1' }
+  // A test run must never add the app under test to the login items, install its panel into
+  // Premiere Pro or check for updates (installed builds do both).
+  const env = {
+    ...process.env,
+    ASSET_LIBRARY_NO_LOGIN_ITEM: '1',
+    ASSET_LIBRARY_NO_PANEL_INSTALL: '1',
+    ASSET_LIBRARY_NO_UPDATE_CHECK: '1'
+  }
   return electron.launch(
     executablePath ? { executablePath, args, env } : { args: ['.', ...args], env }
   )
@@ -154,8 +160,18 @@ test('runs in the background as the engine for the Premiere panel', async () => 
       }
     )
     .toBe(folder)
+  // The panel learns which full catalog is current (and the delta's seq) from engine.json.
+  await expect
+    .poll(
+      () =>
+        (readJson('engine.json')?.['catalog'] as { generation: string } | undefined)?.generation,
+      { timeout: 15_000 }
+    )
+    .toBe(readJson('catalog.json')?.['generation'])
 
+  // Quitting removes engine.json, so the panel knows at once that the engine stopped.
   await app.close()
+  expect(existsSync(join(catalogDir, 'engine.json'))).toBe(false)
   rmSync(userDataDir, { recursive: true, force: true })
   rmSync(folder, { recursive: true, force: true })
 })

@@ -4,6 +4,13 @@ import { join } from 'path'
 export const RENDERER_INDEX = join(__dirname, '../renderer/index.html')
 const WINDOW_BACKGROUND = '#0E0E11'
 
+let current: BrowserWindow | null = null
+
+/** The library window, if it's open. The engine has other (hidden) windows, so don't guess. */
+export function mainWindow(): BrowserWindow | null {
+  return current && !current.isDestroyed() ? current : null
+}
+
 export function createMainWindow(devServerUrl: string | undefined): BrowserWindow {
   const window = new BrowserWindow({
     width: 1360,
@@ -26,6 +33,10 @@ export function createMainWindow(devServerUrl: string | undefined): BrowserWindo
     }
   })
 
+  current = window
+  window.on('closed', () => {
+    if (current === window) current = null
+  })
   window.once('ready-to-show', () => window.show())
 
   if (devServerUrl) {

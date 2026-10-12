@@ -28,6 +28,15 @@ export default defineConfig({
     resolve: {
       alias: { ...alias, '@renderer': resolve('src/renderer/src') }
     },
-    plugins: [react(), tailwindcss()]
+    plugins: [react(), tailwindcss()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/renderer/index.html'),
+          // The engine's hidden sound player for the Premiere panel (no preload, no Node).
+          audio: resolve('src/renderer/audio.html')
+        }
+      }
+    }
   }
 })

@@ -7,10 +7,24 @@ import { parseProbe } from '../media/probe'
 import type { MediaBinaries } from '../media/binaries'
 import { WorkerError, type WorkerClient } from '../worker/client'
 import { externalPreviewPlan, mediaPlan } from '../media/plan'
-import { buildCatalog, writeCatalog } from '../catalog/writer'
+import {
+  CATALOG_LIMITS,
+  CatalogPublisher,
+  readCatalogSnapshot,
+  type CatalogPublishResult
+} from '../catalog/writer'
+import type { PublishCatalog } from '../catalog/publishing'
+import { SKIPPED_DIRECTORIES } from '../worker/scanner'
 
 export type LibraryEvent =
   { type: 'scan-progress'; progress: ScanProgress } | { type: 'library-changed' }
+
+export interface LibraryServiceOptions {
+  /** Writes the panel's catalog. Defaults to building it here, in this process. */
+  publishCatalog?: PublishCatalog
+  /** Called after each catalog write (engine.json then tells the panel right away). */
+  onCatalog?: (result: CatalogPublishResult) => void
+}
 
 const PROBE_BATCH = 24
 const PROBE_CONCURRENCY = 2
@@ -52,7 +66,10 @@ export class LibraryService {
   private catalogDirty = false
   private catalogUrgent = false
   private lastCatalogAt = 0
-  private lastCatalogUpdatedAt: number | null = null
+  private catalog: CatalogPublishResult | null = null
+  /** Folds a lingering delta into a full catalog.json once it's old enough (older panels). */
+  private catalogFoldTimer: NodeJS.Timeout | null = null
+  private readonly publishCatalog: PublishCatalog
   private cleaning = false
   /** Set on quit. After this, late results from the worker are ignored: the database is closing. */
   private stopped = false
@@ -62,26 +79,49 @@ export class LibraryService {
     private readonly worker: WorkerClient,
     private readonly binaries: MediaBinaries,
     private readonly paths: { mediaDir: string; catalogDir: string; appVersion: string },
-    private readonly emit: (event: LibraryEvent) => void
-  ) {}
+    private readonly emit: (event: LibraryEvent) => void,
+    private readonly options: LibraryServiceOptions = {}
+  ) {
+    if (options.publishCatalog) {
+      this.publishCatalog = options.publishCatalog
+    } else {
+      const publisher = new CatalogPublisher({
+        catalogDir: paths.catalogDir,
+        appVersion: paths.appVersion
+      })
+      this.publishCatalog = (full) =>
+        publisher.publish(() => readCatalogSnapshot(repo, paths.mediaDir), full)
+    }
+  }
 
   /** Call before closing the database: cancels pending timers and ignores late worker results. */
   stop(): void {
     this.stopped = true
     if (this.changeTimer) clearTimeout(this.changeTimer)
     if (this.catalogTimer) clearTimeout(this.catalogTimer)
+    if (this.catalogFoldTimer) clearTimeout(this.catalogFoldTimer)
     this.changeTimer = null
     this.catalogTimer = null
+    this.catalogFoldTimer = null
   }
 
-  /** `updatedAt` of the last catalog this engine wrote (the panel's cue to re-read it). */
+  /** `updatedAt` of the last catalog.json this engine wrote (older panels' cue to re-read it). */
   catalogUpdatedAt(): number | null {
-    return this.lastCatalogUpdatedAt
+    return this.catalog?.catalogUpdatedAt ?? null
+  }
+
+  /** The full catalog's generation and the delta's seq, once a catalog has been written. */
+  catalogVersion(): { generation: string; deltaSeq: number } | null {
+    return this.catalog
+      ? { generation: this.catalog.generation, deltaSeq: this.catalog.deltaSeq }
+      : null
   }
 
   /** Call once at start-up: tidies up after a crash, then refreshes every root in the background. */
   start(): void {
     this.repo.recoverInterruptedScans()
+    // Files indexed before their folder was skipped (e.g. Premiere Composer's previews).
+    this.repo.purgeSkippedFolders(SKIPPED_DIRECTORIES)
     this.repo.retryMissingThumbnails()
     for (const root of this.repo.listRoots()) void this.rescan(root.id)
     void this.probePending()
@@ -135,13 +175,16 @@ export class LibraryService {
     }
     const abort = new AbortController()
     this.scanning.set(rootId, abort)
-    const scanId = this.repo.startScan(rootId)
     let filesSeen = 0
     this.filesSeen.set(rootId, 0)
+    let scanId: number | null = null
     // The root can be removed while its scan runs; after that its results go nowhere.
     const gone = (): boolean => this.stopped || abort.signal.aborted || !this.repo.hasRoot(rootId)
-    this.emitProgress({ rootId, state: 'scanning', filesSeen }, true)
     try {
+      // Inside the try: whatever fails, the root must stop counting as "indexing".
+      scanId = this.repo.startScan(rootId)
+      const currentScan = scanId
+      this.emitProgress({ rootId, state: 'scanning', filesSeen }, true)
       const result = await this.worker.request(
         {
           type: 'scan',
@@ -151,7 +194,7 @@ export class LibraryService {
         },
         (entries) => {
           if (gone()) return
-          this.repo.applyScanBatch(rootId, scanId, entries)
+          this.repo.applyScanBatch(rootId, currentScan, entries)
           filesSeen += entries.length
           this.filesSeen.set(rootId, filesSeen)
           this.emitProgress({ rootId, state: 'scanning', filesSeen })
@@ -160,9 +203,11 @@ export class LibraryService {
         abort.signal
       )
       if (gone()) return
+      // Files indexed inside folders that are skipped now are dropped, not called missing.
+      if (this.repo.purgeSkippedFolders(SKIPPED_DIRECTORIES, rootId) > 0) void this.cleanupMedia()
       if (!result.complete) {
         // Some folders couldn't be listed. Keep what was found but don't mark anything missing.
-        this.repo.abortScan(scanId)
+        this.repo.abortScan(currentScan)
         this.emitProgress(
           {
             rootId,
@@ -173,13 +218,13 @@ export class LibraryService {
           true
         )
       } else {
-        const summary = this.repo.finishScan(rootId, scanId)
+        const summary = this.repo.finishScan(rootId, currentScan)
         this.emitProgress({ rootId, state: 'done', ...summary }, true)
       }
       void this.probePending()
     } catch (error) {
       if (gone()) return
-      this.repo.abortScan(scanId)
+      if (scanId !== null) this.repo.abortScan(scanId)
       if (error instanceof WorkerError && error.code === 'root-unavailable') {
         this.repo.setRootStatus(rootId, 'offline')
         this.emitProgress(
@@ -432,7 +477,7 @@ export class LibraryService {
   /**
    * Rewrites the panel's catalog once the library settles, at most every few seconds while it
    * keeps changing, and never two writes at once. `urgent` (a change the user just made by hand)
-   * skips the wait.
+   * skips the wait. Most writes are a small delta; the first one after start-up is a full catalog.
    */
   private scheduleCatalog(urgent = false): void {
     if (this.stopped) return
@@ -452,26 +497,47 @@ export class LibraryService {
       this.catalogTimer = null
       if (this.stopped) return
       this.lastCatalogAt = Date.now()
-      try {
-        const catalog = buildCatalog(this.repo, this.paths.mediaDir, this.paths.appVersion)
-        this.catalogWriting = writeCatalog(this.paths.catalogDir, catalog)
-          .then(() => {
-            this.lastCatalogUpdatedAt = catalog.updatedAt
-          })
-          .catch(() => undefined)
-          .finally(() => {
-            this.catalogWriting = null
-            if (this.catalogDirty) {
-              const urgentNext = this.catalogUrgent
-              this.catalogDirty = false
-              this.catalogUrgent = false
-              this.scheduleCatalog(urgentNext)
-            }
-          })
-      } catch {
-        // A failed catalog build must never take the app down; the next change retries it.
-      }
+      // A failed write must never take the app down; the next change (or the fold timer) retries.
+      this.catalogWriting = Promise.resolve()
+        .then(() => this.publishCatalog(this.catalog === null))
+        .then((result) => {
+          if (this.stopped) return
+          this.catalog = result
+          this.scheduleCatalogFold(result)
+          this.options.onCatalog?.(result)
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          this.catalogWriting = null
+          if (this.catalogDirty) {
+            const urgentNext = this.catalogUrgent
+            this.catalogDirty = false
+            this.catalogUrgent = false
+            this.scheduleCatalog(urgentNext)
+          }
+        })
     }, wait)
+  }
+
+  /**
+   * While a delta is pending, older panels (which read only catalog.json) don't see it. Once it's
+   * old enough the next write is a full catalog, so make sure a write happens then.
+   */
+  private scheduleCatalogFold(result: CatalogPublishResult): void {
+    if (result.deltaSeq === 0) {
+      if (this.catalogFoldTimer) clearTimeout(this.catalogFoldTimer)
+      this.catalogFoldTimer = null
+      return
+    }
+    if (this.catalogFoldTimer) return
+    const due = result.catalogUpdatedAt + CATALOG_LIMITS.maxAgeMs - Date.now()
+    this.catalogFoldTimer = setTimeout(
+      () => {
+        this.catalogFoldTimer = null
+        this.scheduleCatalog()
+      },
+      Math.max(0, due) + 1000
+    )
   }
 
   /** Scan progress for the status bar; "scanning" updates are throttled per root. */

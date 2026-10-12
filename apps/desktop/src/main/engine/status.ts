@@ -1,3 +1,4 @@
+import { rmSync } from 'fs'
 import { readdir, stat } from 'fs/promises'
 import { join } from 'path'
 import {
@@ -23,7 +24,16 @@ export interface StatusSource {
   startAtLogin(): boolean
   /** `updatedAt` of the last catalog written, or null before the first one. */
   catalogUpdatedAt?(): number | null
+  /** The full catalog's generation and the delta's seq, or null before the first catalog. */
+  catalog?(): { generation: string; deltaSeq: number } | null
+  /** Whether the daily update check is on. */
+  checkForUpdates?(): boolean
+  /** A newer release, if the update check found one. */
+  update?(): { version: string; url: string } | null
 }
+
+/** How long quitting waits for a status write in progress before removing engine.json. */
+const SHUTDOWN_WAIT_MS = 1000
 
 /** Total size of the files directly inside `dir` (the media cache is flat). */
 export async function folderBytes(dir: string): Promise<number> {
@@ -77,6 +87,32 @@ export class EngineStatusWriter {
     this.timer = null
   }
 
+  /**
+   * Stops writing and removes engine.json, so the panel knows at once that the engine has quit
+   * (instead of waiting for missed heartbeats). Waits briefly for a write in progress, which
+   * would otherwise put the file back.
+   */
+  async shutdown(): Promise<void> {
+    this.stop()
+    const writing = this.writing
+    if (writing) {
+      await Promise.race([
+        writing.catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, SHUTDOWN_WAIT_MS))
+      ])
+    }
+    this.removeFile()
+  }
+
+  /** Removes engine.json now (the last step of quitting). Never throws. */
+  removeFile(): void {
+    try {
+      rmSync(this.file, { force: true })
+    } catch {
+      // Locked by a reader on Windows; the panel then sees the heartbeat stop instead.
+    }
+  }
+
   /** Called with every status written (the tray shows it). */
   onStatus(listener: (status: EngineStatus) => void): void {
     this.listeners.push(listener)
@@ -99,18 +135,27 @@ export class EngineStatusWriter {
       this.cacheMeasuredAt = this.now()
       this.cacheBytes = await folderBytes(this.source.mediaDir)
     }
+    const catalogUpdatedAt = this.source.catalogUpdatedAt?.() ?? null
+    const catalog = this.source.catalog?.() ?? null
+    const checkForUpdates = this.source.checkForUpdates?.()
+    const update = this.source.update?.() ?? null
     return {
       version: this.source.version,
       updatedAt: this.now(),
       indexing: this.source.indexing(),
       pendingMedia: this.source.pendingMedia(),
-      settings: { startAtLogin: this.source.startAtLogin() },
+      settings: {
+        startAtLogin: this.source.startAtLogin(),
+        ...(checkForUpdates === undefined ? {} : { checkForUpdates })
+      },
       cacheBytes: this.cacheBytes,
       importsFolder: this.source.importsFolder,
       results: [...this.results],
-      ...(this.source.catalogUpdatedAt?.() != null
-        ? { catalogUpdatedAt: this.source.catalogUpdatedAt() as number }
-        : {})
+      ...(catalogUpdatedAt !== null ? { catalogUpdatedAt } : {}),
+      ...(catalog
+        ? { catalog: { generation: catalog.generation, deltaSeq: catalog.deltaSeq } }
+        : {}),
+      ...(update ? { update: { version: update.version, url: update.url } } : {})
     }
   }
 
@@ -126,6 +171,11 @@ export class EngineStatusWriter {
         const status = await this.status()
         if (this.stopped) return
         await writeFileAtomic(this.catalogDir, ENGINE_STATUS_FILE, JSON.stringify(status))
+        // Quitting began while this was being written: don't leave a live-looking status.
+        if (this.stopped) {
+          this.removeFile()
+          return
+        }
         for (const listener of this.listeners) listener(status)
       } catch {
         // A missed beat is harmless; the next one retries.

@@ -8,7 +8,20 @@ import winIcon2x from '../../../resources/tray@2x.png?asset'
 export interface TrayActions {
   openWindow(): void
   setStartAtLogin(enabled: boolean): void
+  /** Installs (or reinstalls) the bundled Premiere Pro panel. */
+  installPanel(): void
+  /** Opens the newer release's page in the browser. */
+  openUpdate(url: string): void
   quit(): void
+}
+
+/** What the tray menu shows. */
+export interface TrayState {
+  line: string
+  startAtLogin: boolean
+  update: { version: string; url: string } | null
+  /** False while the panel is being installed (the item is greyed out). */
+  canInstallPanel: boolean
 }
 
 /** The menu-bar (macOS) or notification-area (Windows) icon, at 1x and 2x. */
@@ -31,8 +44,7 @@ function trayImage(platform: NodeJS.Platform): NativeImage {
  */
 export class EngineTray {
   private readonly tray: Tray
-  private line = ''
-  private startAtLogin = false
+  private shown = ''
 
   constructor(
     private readonly productName: string,
@@ -46,16 +58,30 @@ export class EngineTray {
   }
 
   /** Rebuilds the menu only when what it shows has changed. */
-  update(line: string, startAtLogin: boolean): void {
-    if (line === this.line && startAtLogin === this.startAtLogin && this.line !== '') return
-    this.line = line
-    this.startAtLogin = startAtLogin
+  update(state: TrayState): void {
+    const key = JSON.stringify(state)
+    if (key === this.shown) return
+    this.shown = key
+    const { line, startAtLogin, update } = state
     this.tray.setToolTip(`${this.productName}: ${line}`)
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: line, enabled: false },
+        ...(update
+          ? [
+              {
+                label: `Update available (${update.version})…`,
+                click: () => this.actions.openUpdate(update.url)
+              }
+            ]
+          : []),
         { type: 'separator' },
         { label: `Open ${this.productName} window`, click: () => this.actions.openWindow() },
+        {
+          label: 'Install Premiere Pro panel',
+          enabled: state.canInstallPanel,
+          click: () => this.actions.installPanel()
+        },
         {
           label: 'Start at login',
           type: 'checkbox',

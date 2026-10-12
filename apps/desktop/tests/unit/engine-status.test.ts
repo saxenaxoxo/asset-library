@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -34,9 +42,10 @@ beforeEach(() => {
   )
 })
 
-afterEach(() => {
-  writer.stop()
-  rmSync(dir, { recursive: true, force: true })
+afterEach(async () => {
+  // A write scheduled by the test may still be in flight; let it finish before the folder goes.
+  await writer.shutdown()
+  rmSync(dir, { recursive: true, force: true, maxRetries: 3 })
 })
 
 const read = (): ReturnType<typeof parseEngineStatus> =>
@@ -108,6 +117,74 @@ describe('EngineStatusWriter', () => {
       startAtLogin: () => false
     })
     await expect(broken.write()).resolves.toBeUndefined()
+  })
+})
+
+describe('EngineStatusWriter catalog, update and quitting', () => {
+  it('publishes the catalog version, the update setting and a newer release', async () => {
+    const full = new EngineStatusWriter(
+      join(dir, 'catalog'),
+      {
+        version: '0.2.0',
+        importsFolder: '',
+        mediaDir,
+        indexing: () => ({ rootIds: [], filesSeen: 0 }),
+        pendingMedia: () => 0,
+        startAtLogin: () => false,
+        catalogUpdatedAt: () => 123,
+        catalog: () => ({ generation: 'g1', deltaSeq: 4 }),
+        checkForUpdates: () => true,
+        update: () => ({
+          version: '0.3.0',
+          url: 'https://github.com/saxenaxoxo/asset-library/releases/tag/v0.3.0'
+        })
+      },
+      3000,
+      () => clock
+    )
+    await full.write()
+    expect(read()).toMatchObject({
+      catalogUpdatedAt: 123,
+      catalog: { generation: 'g1', deltaSeq: 4 },
+      settings: { startAtLogin: false, checkForUpdates: true },
+      update: {
+        version: '0.3.0',
+        url: 'https://github.com/saxenaxoxo/asset-library/releases/tag/v0.3.0'
+      }
+    })
+    full.stop()
+  })
+
+  it('removes engine.json on quit, so the panel knows at once', async () => {
+    await writer.write()
+    expect(existsSync(writer.file)).toBe(true)
+    await writer.shutdown()
+    expect(existsSync(writer.file)).toBe(false)
+    // Nothing writes it again afterwards.
+    await writer.write()
+    expect(existsSync(writer.file)).toBe(false)
+  })
+
+  it('a write already under way when quitting does not bring the file back', async () => {
+    const slow = new EngineStatusWriter(
+      join(dir, 'catalog'),
+      {
+        version: '0',
+        importsFolder: '',
+        mediaDir,
+        indexing: () => ({ rootIds: [], filesSeen: 0 }),
+        pendingMedia: () => 0,
+        startAtLogin: () => true
+      },
+      3000,
+      () => clock
+    )
+    await slow.write()
+    clock += 60_000 // the next write measures the cache folder again, so it takes a moment
+    const writing = slow.write()
+    const quitting = slow.shutdown()
+    await Promise.all([writing, quitting])
+    expect(existsSync(slow.file)).toBe(false)
   })
 })
 

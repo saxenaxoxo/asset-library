@@ -11,6 +11,16 @@ export function openDatabase(file: string): LibraryDatabase {
   return db
 }
 
+/**
+ * A read-only connection to an existing library database, for readers outside the main process
+ * (the catalog writer). WAL mode lets it read a consistent snapshot while the main process writes.
+ */
+export function openReadOnlyDatabase(file: string): LibraryDatabase {
+  const db = new Database(file, { readonly: true, fileMustExist: true })
+  db.pragma('busy_timeout = 5000')
+  return db
+}
+
 export interface DatabaseCapabilities {
   sqliteVersion: string
   fts5: boolean

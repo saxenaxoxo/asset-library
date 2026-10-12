@@ -6,8 +6,21 @@ export interface EngineSettings {
   startAtLogin: boolean
 }
 
+/** A newer release found by the update check. */
+export interface AvailableUpdate {
+  version: string
+  url: string
+}
+
 interface StoredSettings {
   startAtLogin?: boolean
+  /** The daily check for a new release (on unless the user turned it off). */
+  checkForUpdates?: boolean
+  lastUpdateCheckAt?: number
+  /** What the last check found, shown until the app is updated. */
+  latestRelease?: AvailableUpdate
+  /** The bundled panel version the engine last tried to install by itself. */
+  panelAutoInstalled?: string
 }
 
 /** Turns the operating system's "open at login" entry on or off. Electron-specific, so injected. */
@@ -32,8 +45,21 @@ export class SettingsStore {
     try {
       const data = JSON.parse(readFileSync(file, 'utf8')) as unknown
       if (!data || typeof data !== 'object') return {}
-      const login = (data as Record<string, unknown>)['startAtLogin']
-      return typeof login === 'boolean' ? { startAtLogin: login } : {}
+      const d = data as Record<string, unknown>
+      const stored: StoredSettings = {}
+      if (typeof d['startAtLogin'] === 'boolean') stored.startAtLogin = d['startAtLogin']
+      if (typeof d['checkForUpdates'] === 'boolean') stored.checkForUpdates = d['checkForUpdates']
+      if (typeof d['lastUpdateCheckAt'] === 'number') {
+        stored.lastUpdateCheckAt = d['lastUpdateCheckAt']
+      }
+      const release = d['latestRelease'] as Partial<AvailableUpdate> | undefined
+      if (release && typeof release.version === 'string' && typeof release.url === 'string') {
+        stored.latestRelease = { version: release.version, url: release.url }
+      }
+      if (typeof d['panelAutoInstalled'] === 'string') {
+        stored.panelAutoInstalled = d['panelAutoInstalled']
+      }
+      return stored
     } catch {
       return {}
     }
@@ -41,6 +67,40 @@ export class SettingsStore {
 
   get settings(): EngineSettings {
     return { startAtLogin: this.stored.startAtLogin ?? true }
+  }
+
+  get checkForUpdates(): boolean {
+    return this.stored.checkForUpdates ?? true
+  }
+
+  setCheckForUpdates(enabled: boolean): void {
+    this.stored = { ...this.stored, checkForUpdates: enabled }
+    this.save()
+  }
+
+  /** When the update check last ran, and the newer release it found (if any). */
+  get updateCheck(): { lastCheckAt: number | null; latest: AvailableUpdate | null } {
+    return {
+      lastCheckAt: this.stored.lastUpdateCheckAt ?? null,
+      latest: this.stored.latestRelease ?? null
+    }
+  }
+
+  recordUpdateCheck(at: number, latest: AvailableUpdate | null): void {
+    const next: StoredSettings = { ...this.stored, lastUpdateCheckAt: at }
+    if (latest) next.latestRelease = latest
+    else delete next.latestRelease
+    this.stored = next
+    this.save()
+  }
+
+  get panelAutoInstalled(): string | null {
+    return this.stored.panelAutoInstalled ?? null
+  }
+
+  recordPanelAutoInstall(version: string): void {
+    this.stored = { ...this.stored, panelAutoInstalled: version }
+    this.save()
   }
 
   /**

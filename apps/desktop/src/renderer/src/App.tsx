@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
-import { SearchX } from 'lucide-react'
+import { LoaderCircle, SearchX } from 'lucide-react'
 import type { AppInfo } from '@shared/api'
 import type {
   AssetQuery,
@@ -19,6 +19,7 @@ import { AssetList } from './components/AssetList'
 import { DetailsPanel } from './components/DetailsPanel'
 import { SettingsView } from './components/SettingsView'
 import { useAssetPages, type AssetPages } from './hooks/useAssetPages'
+import { FavoriteToggle } from './lib/favorite-toggle'
 import type { AssetViewHandle, ViewId, ViewMode } from './types'
 
 const VIEW_TITLES: Record<string, string> = {
@@ -54,6 +55,33 @@ function queryForView(view: ViewId): AssetQuery {
     default:
       return {}
   }
+}
+
+/** Shown while a new view or search loads; only after a moment, so quick loads don't flash. */
+function LoadingState(): React.JSX.Element {
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(true), 150)
+    return () => clearTimeout(timer)
+  }, [])
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-1 items-center justify-center gap-2 text-sm text-ink-3"
+    >
+      {visible && (
+        <>
+          <LoaderCircle
+            size={16}
+            strokeWidth={1.75}
+            className="animate-spin motion-reduce:animate-none"
+          />
+          Loading assets…
+        </>
+      )}
+    </div>
+  )
 }
 
 function useDebounced<T>(value: T, delay: number): T {
@@ -110,6 +138,7 @@ export default function App(): React.JSX.Element {
   const [refreshKey, setRefreshKey] = useState(0)
   const searchRef = useRef<HTMLInputElement>(null)
   const viewRef = useRef<AssetViewHandle>(null)
+  const favoriteToggle = useRef(new FavoriteToggle())
 
   const debouncedText = useDebounced(text, 150)
   const query = useMemo<AssetQuery>(
@@ -152,7 +181,10 @@ export default function App(): React.JSX.Element {
     void window.assetLibrary.getAsset(id).then((asset) => {
       setSelection((current) => {
         if (current?.asset.id !== id) return current
-        return asset ? { ...current, asset } : null
+        if (!asset) return null
+        // A favorite still being saved wins over what was read before it.
+        const favorite = favoriteToggle.current.current(id, asset.favorite)
+        return { ...current, asset: { ...asset, favorite } }
       })
     })
   })
@@ -222,9 +254,14 @@ export default function App(): React.JSX.Element {
     if (!current) return
     if (event.key === 'Escape') setSelection(null)
     if (event.key.toLowerCase() === 'f' && !event.metaKey && !event.ctrlKey) {
-      void window.assetLibrary
-        .setFavorite(current.id, !current.favorite)
-        .then(() => setRefreshKey((key) => key + 1))
+      // From the latest press, not the record in hand (it's refetched only after saving).
+      const id = current.id
+      const favorite = favoriteToggle.current.next(id, current.favorite)
+      setSelection((s) => (s?.asset.id === id ? { ...s, asset: { ...s.asset, favorite } } : s))
+      void window.assetLibrary.setFavorite(id, favorite).finally(() => {
+        favoriteToggle.current.saved(id, favorite)
+        setRefreshKey((key) => key + 1)
+      })
     }
     if (event.key === 'Enter' && !isOtherControl(event.target)) {
       // Stops a focused tile from also handling Enter as a click on itself.
@@ -260,7 +297,9 @@ export default function App(): React.JSX.Element {
         Couldn&apos;t load assets: {pages.error}
       </div>
     )
-  } else if (!pages.loading && pages.total === 0) {
+  } else if (pages.loading) {
+    content = <LoadingState />
+  } else if (pages.total === 0) {
     content = (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
         <SearchX size={28} strokeWidth={1.5} className="text-ink-3" />

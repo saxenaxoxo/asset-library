@@ -18,8 +18,9 @@
     "icons": "node scripts/build-icons.mjs",
     "check": "pnpm typecheck && pnpm test",
     "postinstall": "electron-builder install-app-deps",
-    "dist:mac": "electron-vite build && electron-builder --mac --publish never",
-    "dist:win": "electron-vite build && electron-builder --win --publish never"
+    "panel:bundle": "node scripts/prepare-panel.mjs",
+    "dist:mac": "node scripts/prepare-panel.mjs && electron-vite build && electron-builder --mac --publish never",
+    "dist:win": "node scripts/prepare-panel.mjs && electron-vite build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

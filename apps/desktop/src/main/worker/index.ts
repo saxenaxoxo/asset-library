@@ -6,6 +6,9 @@ import { RootUnavailableError, scanRoot } from './scanner'
 import { PROBE_ARGS } from '../media/probe'
 import { ffmpegVersion } from '../media/version'
 import type { WorkerMessage, WorkerRequest } from './protocol'
+import { openReadOnlyDatabase, type LibraryDatabase } from '../library/database'
+import { LibraryRepository } from '../library/repository'
+import { CatalogPublisher, readCatalogSnapshot } from '../catalog/writer'
 
 const FFPROBE_TIMEOUT_MS = 20_000
 const FFMPEG_TIMEOUT_MS = 90_000
@@ -13,6 +16,36 @@ const MAX_PROBE_OUTPUT = 4 * 1024 * 1024
 
 /** Scans asked to stop early (their root was removed). */
 const cancelled = new Set<number>()
+
+/** The catalog writer's database connection and state (what the last full catalog held). */
+let catalog: {
+  key: string
+  db: LibraryDatabase
+  repo: LibraryRepository
+  publisher: CatalogPublisher
+} | null = null
+
+function publishCatalog(request: Extract<WorkerRequest, { type: 'catalog' }>): Promise<unknown> {
+  const key = [request.dbFile, request.catalogDir, request.appVersion].join('\n')
+  if (catalog?.key !== key) {
+    catalog?.db.close()
+    catalog = null
+    const db = openReadOnlyDatabase(request.dbFile)
+    catalog = {
+      key,
+      db,
+      repo: new LibraryRepository(db),
+      publisher: new CatalogPublisher({
+        catalogDir: request.catalogDir,
+        appVersion: request.appVersion
+      })
+    }
+  }
+  const { db, repo, publisher } = catalog
+  // One read transaction: assets, folders and tags all come from the same moment.
+  const read = db.transaction(() => readCatalogSnapshot(repo, request.mediaDir))
+  return publisher.publish(() => read(), request.full)
+}
 
 function send(message: WorkerMessage): void {
   process.parentPort.postMessage(message)
@@ -50,6 +83,8 @@ async function handle(request: WorkerRequest): Promise<unknown> {
     case 'cancel':
       cancelled.add(request.target)
       return true
+    case 'catalog':
+      return publishCatalog(request)
     case 'probe':
       return run(request.ffprobePath, [...PROBE_ARGS, request.path], FFPROBE_TIMEOUT_MS)
     case 'media': {

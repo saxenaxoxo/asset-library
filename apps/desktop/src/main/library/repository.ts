@@ -422,6 +422,38 @@ export class LibraryRepository {
     return finish()
   }
 
+  /**
+   * Deletes index entries for files inside folders the scanner skips (by folder name, at any
+   * depth), with their search rows; their cached media is then unreferenced and swept by the
+   * media cleanup. Only the index changes, never the files. Returns how many were removed.
+   */
+  purgeSkippedFolders(folderNames: Iterable<string>, rootId?: number): number {
+    const conditions: string[] = []
+    const params: string[] = []
+    for (const name of folderNames) {
+      // GLOB is case-sensitive, like the scanner's check; LIKE would also match other folders.
+      const quoted = name.replace(/[[*?]/g, (c) => `[${c}]`)
+      conditions.push('rel_path glob ?', 'rel_path glob ?')
+      params.push(`${quoted}/*`, `*/${quoted}/*`)
+    }
+    if (conditions.length === 0) return 0
+    const where = `(${conditions.join(' or ')})${rootId === undefined ? '' : ' and root_id = ?'}`
+    const args = rootId === undefined ? params : [...params, rootId]
+    const purge = this.db.transaction((): number => {
+      this.db
+        .prepare(
+          `delete from assets_fts where rowid in (select search_id from assets where ${where})`
+        )
+        .run(...args)
+      const removed = this.db.prepare(`delete from assets where ${where}`).run(...args).changes
+      if (removed > 0) {
+        this.db.prepare('delete from tags where id not in (select tag_id from asset_tags)').run()
+      }
+      return removed
+    })
+    return purge()
+  }
+
   /** Stops a scan without drawing conclusions (e.g. the drive was unplugged mid-scan). */
   abortScan(scanId: number): void {
     this.db

@@ -5,8 +5,11 @@ import { join, relative, sep } from 'path'
 import { kindForFile } from '@shared/media-types'
 import type { ScanEntry } from '../library/types'
 
-/** Folders that are never indexed (OS/system/trash/caches). Hidden (dot) entries are skipped too. */
-const SKIPPED_DIRECTORIES = new Set([
+/**
+ * Folders that are never indexed (OS/system/trash/caches). Hidden (dot) entries are skipped too.
+ * Files indexed inside one of these before it was skipped are removed from the index.
+ */
+export const SKIPPED_DIRECTORIES: ReadonlySet<string> = new Set([
   '$RECYCLE.BIN',
   'System Volume Information',
   'node_modules',

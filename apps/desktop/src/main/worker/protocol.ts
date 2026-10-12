@@ -1,5 +1,6 @@
 import type { ScanEntry } from '../library/types'
 import type { MediaJob } from '../media/plan'
+import type { CatalogPublishResult } from '../catalog/writer'
 
 /** Messages between the main process and the utility (worker) process. */
 export type WorkerRequest =
@@ -15,6 +16,19 @@ export type WorkerRequest =
   | { id: number; type: 'media'; ffmpegPath: string; outDir: string; jobs: MediaJob[] }
   /** Stops a running scan early; the scan then resolves with what it found so far. */
   | { id: number; type: 'cancel'; target: number }
+  /**
+   * Writes the panel's catalog (full or delta) from a read-only connection to the library
+   * database, so building and serializing a large catalog never blocks the main process.
+   */
+  | {
+      id: number
+      type: 'catalog'
+      dbFile: string
+      catalogDir: string
+      mediaDir: string
+      appVersion: string
+      full: boolean
+    }
 
 /** What each request type resolves to. */
 export interface WorkerResults {
@@ -25,6 +39,7 @@ export interface WorkerResults {
   /** Generated file name per output, or null where generation failed. */
   media: Partial<Record<MediaJob['output'], string | null>>
   cancel: true
+  catalog: CatalogPublishResult
 }
 
 /** `crashed`: the worker died mid-request, so the request says nothing about the file. */
