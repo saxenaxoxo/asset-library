@@ -26,6 +26,8 @@ mac:
   notarize: false
   identity: '-'
   entitlements: build/entitlements.mac.plist
+  extendInfo:
+    NSAppleEventsUsageDescription: Asset Library sends assets you choose to After Effects.
   extraResources:
     - from: resources/ffmpeg/darwin-${arch}
       to: ffmpeg

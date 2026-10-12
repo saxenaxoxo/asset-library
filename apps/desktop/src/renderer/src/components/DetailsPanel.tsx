@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FolderSearch, GripVertical, Plus, Star, X } from 'lucide-react'
 import type { AssetRecord, RootRecord } from '@shared/library'
+import type { Hosts } from '@shared/api'
 import { formatBytes, formatDuration, formatResolution } from '../lib/format'
 import { AssetPreview } from './AssetPreview'
 import { startAssetDrag } from '../lib/drag'
@@ -35,6 +36,19 @@ export function DetailsPanel({
 }: DetailsPanelProps): React.JSX.Element {
   const [tagDraft, setTagDraft] = useState('')
   const [revealFailed, setRevealFailed] = useState(false)
+  const [hosts, setHosts] = useState<Hosts | null>(null)
+  const [hostMessage, setHostMessage] = useState<{ ok: boolean; text: string } | null>(null)
+  const [addToComp, setAddToComp] = useState(true)
+
+  useEffect(() => {
+    void window.assetLibrary.getHosts().then(setHosts)
+  }, [])
+
+  async function sendToAfterEffects(): Promise<void> {
+    setHostMessage({ ok: true, text: 'Sending to After Effects…' })
+    const result = await window.assetLibrary.sendToAfterEffects(asset.id, addToComp)
+    setHostMessage({ ok: result.ok, text: result.message })
+  }
 
   async function toggleFavorite(): Promise<void> {
     await window.assetLibrary.setFavorite(asset.id, !asset.favorite)
@@ -127,6 +141,34 @@ export function DetailsPanel({
             <FolderSearch size={15} />
           </button>
         </div>
+        {hosts?.afterEffects && asset.status === 'ok' && (
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={() => void sendToAfterEffects()}
+              className="flex h-8 w-full items-center justify-center rounded-lg border border-line-strong text-sm text-ink hover:bg-raised"
+            >
+              {asset.ext === 'ffx'
+                ? 'Apply to selected layers in After Effects'
+                : 'Send to After Effects'}
+            </button>
+            {asset.ext !== 'ffx' && asset.ext !== 'aep' && (
+              <label className="mt-1.5 flex items-center gap-2 text-xs text-ink-3">
+                <input
+                  type="checkbox"
+                  checked={addToComp}
+                  onChange={(event) => setAddToComp(event.target.checked)}
+                />
+                Also add to the active comp at the current time
+              </label>
+            )}
+            {hostMessage && (
+              <p className={`mt-1.5 text-xs ${hostMessage.ok ? 'text-ink-2' : 'text-danger'}`}>
+                {hostMessage.text}
+              </p>
+            )}
+          </div>
+        )}
         {revealFailed && (
           <p className="mt-2 text-xs text-danger">The file isn’t where it was last seen.</p>
         )}

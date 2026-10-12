@@ -10,6 +10,7 @@ import type { MediaBinaries } from '../media/binaries'
 import { databaseCapabilities, type LibraryDatabase } from '../library/database'
 import type { LibraryRepository } from '../library/repository'
 import type { LibraryService } from '../library/service'
+import { findAfterEffects, sendToAfterEffects } from '../hosts/after-effects'
 
 export interface IpcDependencies {
   db: LibraryDatabase
@@ -91,6 +92,24 @@ export function registerIpcHandlers(
     if (!path || !existsSync(path)) return false
     shell.showItemInFolder(path)
     return true
+  })
+
+  // ── Editing apps ─────────────────────────────────────────────────────────
+  handle(IpcChannel.getHosts, isTrustedSender, async () => {
+    const ae = findAfterEffects()
+    return { afterEffects: ae ? { version: ae.version } : null }
+  })
+
+  handle(IpcChannel.sendToAfterEffects, isTrustedSender, async ({ id, addToComp }) => {
+    const path = repo.assetPath(id)
+    if (!path || !existsSync(path)) {
+      return { ok: false, message: 'The file isn’t where it was last seen. Rescan the folder.' }
+    }
+    try {
+      return { ok: true, message: await sendToAfterEffects({ path, addToComp }) }
+    } catch (error) {
+      return { ok: false, message: (error as Error).message }
+    }
   })
 
   // ── Drag-out ─────────────────────────────────────────────────────────────

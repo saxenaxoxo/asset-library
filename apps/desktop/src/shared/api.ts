@@ -11,6 +11,8 @@ import type {
 
 export type AppInfo = IpcResponse<typeof IpcChannel.getAppInfo>
 export type Diagnostics = IpcResponse<typeof IpcChannel.getDiagnostics>
+export type Hosts = IpcResponse<typeof IpcChannel.getHosts>
+export type HostResult = IpcResponse<typeof IpcChannel.sendToAfterEffects>
 export type DragItem = IpcResponse<typeof IpcChannel.pickDragTestFiles>[number]
 export type {
   AssetPage,
@@ -45,6 +47,11 @@ export interface AssetLibraryApi {
   revealAsset(id: string): Promise<boolean>
   listTags(): Promise<TagCount[]>
   getCounts(): Promise<LibraryCounts>
+
+  /** Which editing apps can receive assets directly. */
+  getHosts(): Promise<Hosts>
+  /** Imports the asset into the open After Effects project (optionally into the active comp). */
+  sendToAfterEffects(id: string, addToComp: boolean): Promise<HostResult>
 
   /** Subscribes to scan progress and change notifications. Returns an unsubscribe function. */
   onLibraryEvent(listener: (event: LibraryEvent) => void): () => void

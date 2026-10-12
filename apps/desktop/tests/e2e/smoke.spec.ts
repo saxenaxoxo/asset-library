@@ -37,6 +37,7 @@ test('launches into the branded empty library', async () => {
     'getAsset',
     'getCounts',
     'getDiagnostics',
+    'getHosts',
     'listRoots',
     'listTags',
     'onLibraryEvent',
@@ -46,6 +47,7 @@ test('launches into the branded empty library', async () => {
     'removeTag',
     'rescan',
     'revealAsset',
+    'sendToAfterEffects',
     'setFavorite',
     'startDrag'
   ])

@@ -18,6 +18,9 @@ const api: AssetLibraryApi = {
   revealAsset: (id) => ipcRenderer.invoke(IpcChannel.revealAsset, { id }),
   listTags: () => ipcRenderer.invoke(IpcChannel.listTags),
   getCounts: () => ipcRenderer.invoke(IpcChannel.getCounts),
+  getHosts: () => ipcRenderer.invoke(IpcChannel.getHosts),
+  sendToAfterEffects: (id, addToComp) =>
+    ipcRenderer.invoke(IpcChannel.sendToAfterEffects, { id, addToComp }),
   onLibraryEvent: (listener) => {
     const handler = (_event: IpcRendererEvent, payload: LibraryEvent): void => listener(payload)
     ipcRenderer.on(LIBRARY_EVENT_CHANNEL, handler)

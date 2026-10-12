@@ -26,6 +26,11 @@ export const DiagnosticsSchema = z.object({
 const AssetIdSchema = z.object({ id: z.uuid() })
 const TagEditSchema = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(60) })
 
+export const HostsSchema = z.object({
+  afterEffects: z.object({ version: z.string() }).nullable()
+})
+export const HostResultSchema = z.object({ ok: z.boolean(), message: z.string() })
+
 export const DragItemSchema = z.object({ id: z.uuid(), name: z.string().min(1) })
 export const StartDragSchema = z.object({ ids: z.array(z.uuid()).min(1).max(500) })
 
@@ -56,6 +61,11 @@ export const ipcContract = {
   [IpcChannel.revealAsset]: { request: AssetIdSchema, response: z.boolean() },
   [IpcChannel.listTags]: { request: z.undefined(), response: z.array(TagCountSchema) },
   [IpcChannel.getCounts]: { request: z.undefined(), response: LibraryCountsSchema },
+  [IpcChannel.getHosts]: { request: z.undefined(), response: HostsSchema },
+  [IpcChannel.sendToAfterEffects]: {
+    request: z.object({ id: z.uuid(), addToComp: z.boolean() }),
+    response: HostResultSchema
+  },
   [IpcChannel.pickDragTestFiles]: { request: z.undefined(), response: z.array(DragItemSchema) },
   [IpcChannel.startDrag]: { request: StartDragSchema, response: z.void() }
 } satisfies Record<IpcChannelName, { request: z.ZodType; response: z.ZodType }>

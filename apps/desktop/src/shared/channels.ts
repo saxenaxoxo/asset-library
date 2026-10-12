@@ -17,6 +17,8 @@ export const IpcChannel = {
   revealAsset: 'assets:reveal',
   listTags: 'tags:list',
   getCounts: 'library:counts',
+  getHosts: 'hosts:get',
+  sendToAfterEffects: 'hosts:send-to-after-effects',
   pickDragTestFiles: 'drag:pick-test-files',
   /** Fire-and-forget (ipcRenderer.send): must start during the renderer's dragstart. */
   startDrag: 'drag:start'

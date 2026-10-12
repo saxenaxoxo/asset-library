@@ -36,7 +36,18 @@ Record ✅ / ❌ (with what happened) next to each line, and copy results into `
 - [ ] Adding while no sequence is open shows "Open a sequence, then try again."
 - [ ] Add a folder in the desktop app → the panel updates within a few seconds.
 
-## 4. Installers (5 min)
+## 4. After Effects 26.5 (10 min) — from the desktop app's details panel
+
+- [ ] With After Effects closed, **Send to After Effects** says to open it first (it must not launch AE).
+- [ ] With a project open: the first time, macOS asks to let Asset Library control After Effects → allow.
+- [ ] **Send to After Effects** imports the original into the project.
+- [ ] With "Also add to the active comp" ticked: a layer is added at the comp's current time.
+- [ ] One **Cmd+Z** undoes it.
+- [ ] A ProRes 4444 overlay keeps its transparency.
+- [ ] An `.ffx` preset applies to the selected layers ("Apply to selected layers in After Effects").
+- [ ] An `.aep` imports as a project.
+
+## 5. Installers (5 min)
 
 - [ ] Open `Asset-Library-<v>-arm64.dmg`, drag to Applications, open. macOS blocks it the first time →
       **System Settings → Privacy & Security → Open Anyway** works.
