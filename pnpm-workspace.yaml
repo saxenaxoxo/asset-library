@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+
+# Dependencies allowed to run install scripts (pnpm blocks all others by default)
+allowBuilds:
+  electron: true
+  esbuild: true
+  sharp: true
+  better-sqlite3: true
+  electron-winstaller: false

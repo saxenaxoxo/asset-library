@@ -1,0 +1,77 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test:e2e
+
+  mac:
+    needs: check
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Cache FFmpeg builds
+        uses: actions/cache@v4
+        with:
+          path: apps/desktop/resources/ffmpeg/darwin-*
+          key: ffmpeg-mac-${{ hashFiles('apps/desktop/scripts/ffmpeg/build-macos.sh') }}
+      - name: Build LGPL FFmpeg (arm64 + x64)
+        run: |
+          cd apps/desktop
+          [ -x resources/ffmpeg/darwin-arm64/ffprobe ] || JOBS=3 scripts/ffmpeg/build-macos.sh arm64
+          [ -x resources/ffmpeg/darwin-x64/ffprobe ] || JOBS=3 scripts/ffmpeg/build-macos.sh x86_64
+      - run: pnpm dist:mac
+      - name: Smoke-test the packaged arm64 app
+        run: pnpm --filter asset-library exec playwright test
+        env:
+          E2E_EXECUTABLE: ${{ github.workspace }}/apps/desktop/dist/mac-arm64/Asset Library.app/Contents/MacOS/Asset Library
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asset-library-macos
+          path: apps/desktop/dist/*.dmg
+
+  windows:
+    needs: check
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch LGPL FFmpeg
+        shell: bash
+        run: apps/desktop/scripts/ffmpeg/fetch-windows.sh
+      - run: pnpm dist:win
+      - name: Smoke-test the packaged app
+        run: pnpm --filter asset-library exec playwright test
+        env:
+          E2E_EXECUTABLE: ${{ github.workspace }}\apps\desktop\dist\win-unpacked\Asset Library.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asset-library-windows
+          path: apps/desktop/dist/*-setup.exe

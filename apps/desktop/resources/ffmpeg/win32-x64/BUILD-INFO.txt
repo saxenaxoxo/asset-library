@@ -1,0 +1,6 @@
+FFmpeg 9.0 (BtbN LGPL shared build) for win32-x64, fetched 2026-10-12T09:23:51Z
+Download: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip
+Download SHA-256: da761aea2cbeeb36e77dcfbf6411ff004875a2836b1f48ed1de08d7536d7d91a
+Upstream package: ffmpeg-n9.0-latest-win64-lgpl-shared-9.0
+Build scripts and sources: https://github.com/BtbN/FFmpeg-Builds
+License: LGPL (BtbN lgpl builds use LGPL-3.0; see LICENSE.txt)

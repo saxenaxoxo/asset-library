@@ -1,0 +1,5 @@
+FFmpeg 9.0.2, built 2026-10-12T09:28:16Z for darwin-x64
+Source: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+Source SHA-256: 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+License: LGPL-2.1-or-later (no --enable-gpl, no --enable-nonfree)
+Configure flags: --arch=x86_64 --cc=clang -arch x86_64 --extra-cflags=-mmacosx-version-min=13.0 --extra-ldflags=-mmacosx-version-min=13.0 --enable-static --disable-shared --disable-autodetect --enable-videotoolbox --enable-audiotoolbox --enable-zlib --disable-network --disable-ffplay --disable-doc --disable-debug --disable-x86asm --enable-cross-compile

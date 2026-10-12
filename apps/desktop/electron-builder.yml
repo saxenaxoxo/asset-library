@@ -1,0 +1,57 @@
+appId: com.saxenascreation.assetlibrary
+productName: Asset Library
+copyright: Copyright © 2026 Saxenas Creation
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+asarUnpack:
+  - resources/**
+  - '**/*.node'
+npmRebuild: false
+
+mac:
+  category: public.app-category.video
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  entitlementsInherit: build/entitlements.mac.plist
+  # No Apple Developer ID by founder decision. Ad-hoc signing ("-") keeps the bundle's
+  # signature valid so Apple Silicon shows "Open Anyway" instead of "damaged".
+  notarize: false
+  identity: '-'
+  entitlements: build/entitlements.mac.plist
+  extraResources:
+    - from: resources/ffmpeg/darwin-${arch}
+      to: ffmpeg
+      filter: ['ffmpeg', 'ffprobe', 'BUILD-INFO.txt', 'LICENSE.txt']
+dmg:
+  artifactName: Asset-Library-${version}-${arch}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  executableName: Asset Library
+  extraResources:
+    - from: resources/ffmpeg/win32-${arch}
+      to: ffmpeg
+      filter: ['*.exe', '*.dll', 'BUILD-INFO.txt', 'LICENSE.txt']
+nsis:
+  artifactName: Asset-Library-${version}-setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Asset Library
+  uninstallDisplayName: Asset Library
+  createDesktopShortcut: always
+
+publish:
+  provider: github
+  owner: saxenaxoxo
+  repo: asset-library
+  releaseType: draft

@@ -1,0 +1,28 @@
+{
+  "name": "asset-library-workspace",
+  "private": true,
+  "description": "Asset Library by Saxenas Creation: desktop app, Premiere Pro panel and shared branding.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "pnpm --filter asset-library dev",
+    "build": "pnpm --filter asset-library build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint --cache .",
+    "test": "pnpm -r --if-present test",
+    "test:e2e": "pnpm --filter asset-library test:e2e",
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "format": "prettier --write .",
+    "icons": "pnpm --filter asset-library icons",
+    "dist:mac": "pnpm --filter asset-library dist:mac",
+    "dist:win": "pnpm --filter asset-library dist:win"
+  },
+  "devDependencies": {
+    "@electron-toolkit/eslint-config-prettier": "^3.0.0",
+    "@electron-toolkit/eslint-config-ts": "^3.1.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "prettier": "^3.7.4"
+  }
+}

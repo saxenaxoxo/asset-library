@@ -1,0 +1,51 @@
+{
+  "name": "asset-library",
+  "productName": "Asset Library",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A free asset manager for video editors and motion designers, by Saxenas Creation.",
+  "main": "./out/main/index.js",
+  "author": "Saxenas Creation",
+  "homepage": "https://github.com/saxenaxoxo/asset-library",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "electron-vite dev --watch",
+    "start": "electron-vite preview",
+    "build": "pnpm typecheck && electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false",
+    "test": "vitest run",
+    "test:e2e": "electron-vite build && playwright test",
+    "icons": "node scripts/build-icons.mjs",
+    "check": "pnpm typecheck && pnpm test",
+    "postinstall": "electron-builder install-app-deps",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "@electron-toolkit/utils": "^4.0.0",
+    "better-sqlite3": "^13.0.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@playwright/test": "^1.56.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "44.7.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "lucide-react": "^0.548.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6",
+    "vitest": "^4.0.10"
+  }
+}

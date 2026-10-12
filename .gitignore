@@ -1,0 +1,14 @@
+node_modules
+out
+dist
+test-results
+playwright-report
+.cache
+.eslintcache
+.DS_Store
+*.log
+
+# FFmpeg binaries are built or downloaded by apps/desktop/scripts/ffmpeg, never committed
+apps/desktop/resources/ffmpeg/*/*
+!apps/desktop/resources/ffmpeg/*/BUILD-INFO.txt
+!apps/desktop/resources/ffmpeg/*/LICENSE.txt
