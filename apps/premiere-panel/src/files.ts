@@ -1,13 +1,14 @@
 // Reading the catalog and media from disk. UXP's file APIs differ between hosts and versions,
 // so each read tries the documented options in order and remembers what worked.
 import { catalogPath, parseCatalog, type Catalog } from '@catalog/types'
+import { detectWindows, storage } from './host'
 import { fileUrl, homeFromDataFolder } from './paths'
 
 const uxp = require('uxp')
 const fs = require('fs')
 const lfs = uxp.storage.localFileSystem
 const CUSTOM_CATALOG_TOKEN = 'assetLibrary.catalogToken'
-const WINDOWS = navigator.platform.toLowerCase().startsWith('win')
+const WINDOWS = detectWindows()
 
 async function readWithFs(path: string): Promise<string> {
   try {
@@ -57,12 +58,12 @@ async function homeFolder(): Promise<string | null> {
 
 /** Where to read the catalog: a location the user chose, or the desktop app's default. */
 export async function locateCatalog(): Promise<string | null> {
-  const token = localStorage.getItem(CUSTOM_CATALOG_TOKEN)
+  const token = storage.get(CUSTOM_CATALOG_TOKEN)
   if (token) {
     try {
       return (await lfs.getEntryForPersistentToken(token)).nativePath
     } catch {
-      localStorage.removeItem(CUSTOM_CATALOG_TOKEN)
+      storage.remove(CUSTOM_CATALOG_TOKEN)
     }
   }
   const home = await homeFolder()
@@ -73,7 +74,11 @@ export async function locateCatalog(): Promise<string | null> {
 export async function chooseCatalog(): Promise<string | null> {
   const entry = await lfs.getFileForOpening({ types: ['json'] })
   if (!entry) return null
-  localStorage.setItem(CUSTOM_CATALOG_TOKEN, await lfs.createPersistentToken(entry))
+  try {
+    storage.set(CUSTOM_CATALOG_TOKEN, await lfs.createPersistentToken(entry))
+  } catch {
+    // Can't remember the choice; it still works for this session.
+  }
   return entry.nativePath
 }
 
@@ -87,29 +92,81 @@ export async function loadCatalog(path: string): Promise<Catalog> {
   return parseCatalog(text)
 }
 
+/** Most fallback blob URLs kept alive at once; the least recently shown are revoked first. */
+const BLOB_CACHE_MAX = 300
+/** Blob URLs by path, oldest first (a Map keeps insertion order, so re-inserting marks "recent"). */
 const blobUrls = new Map<string, string>()
+const blobReads = new Map<string, Promise<string>>()
+/** Set once a file: URL failed but reading the bytes worked: skip file: URLs from then on. */
+let fileUrlsRefused = false
+/** The file each image element was last asked to show, so a slow read can't overwrite a newer one. */
+const imageTargets = new WeakMap<HTMLImageElement, string>()
+
+function cachedBlob(path: string): string | undefined {
+  const url = blobUrls.get(path)
+  if (url) {
+    blobUrls.delete(path)
+    blobUrls.set(path, url)
+  }
+  return url
+}
+
+function rememberBlob(path: string, url: string): void {
+  blobUrls.set(path, url)
+  for (const [oldPath, oldUrl] of blobUrls) {
+    if (blobUrls.size <= BLOB_CACHE_MAX) break
+    blobUrls.delete(oldPath)
+    URL.revokeObjectURL(oldUrl)
+  }
+}
+
+/** One read per path at a time, however many images ask for it. */
+function blobFor(path: string, mime: string): Promise<string> {
+  const cached = cachedBlob(path)
+  if (cached) return Promise.resolve(cached)
+  let read = blobReads.get(path)
+  if (!read) {
+    read = fs
+      .readFile(path)
+      .then((data) => {
+        const url = URL.createObjectURL(new Blob([data as ArrayBuffer], { type: mime }))
+        rememberBlob(path, url)
+        return url
+      })
+      .finally(() => blobReads.delete(path))
+    blobReads.set(path, read)
+  }
+  return read
+}
 
 /**
  * Shows a local image. Tries a file: URL first (fastest); if the host refuses it, reads the
- * bytes and uses a blob URL instead. Each fallback blob is cached per path.
+ * bytes and uses a blob URL instead. Fallback blobs are cached per path (bounded, see above).
  */
 export function showLocalImage(img: HTMLImageElement, path: string, mime: string): void {
-  const cached = blobUrls.get(path)
-  if (cached) {
-    img.src = cached
-    return
-  }
-  img.onerror = () => {
-    img.onerror = null
-    fs.readFile(path)
-      .then((data) => {
-        const url = URL.createObjectURL(new Blob([data as ArrayBuffer], { type: mime }))
-        blobUrls.set(path, url)
-        img.src = url
+  imageTargets.set(img, path)
+  img.onerror = null
+  const showBlob = (afterFileUrlFailed: boolean): void => {
+    blobFor(path, mime)
+      .then((url) => {
+        if (afterFileUrlFailed) fileUrlsRefused = true
+        // The element may have been pointed at another file meanwhile.
+        if (imageTargets.get(img) === path) img.src = url
       })
       .catch(() => img.classList.add('broken'))
   }
-  img.src = fileUrl(path)
+  const cached = cachedBlob(path)
+  if (cached) {
+    img.src = cached
+  } else if (fileUrlsRefused) {
+    showBlob(false)
+  } else {
+    img.onerror = () => {
+      img.onerror = null
+      showBlob(true)
+    }
+    img.src = fileUrl(path)
+  }
 }
 
 export function mimeFor(path: string): string {

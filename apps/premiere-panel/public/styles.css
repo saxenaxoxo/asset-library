@@ -196,6 +196,7 @@ body {
 }
 
 .preview {
+  position: relative;
   width: 96px;
   height: 54px;
   border-radius: 4px;
@@ -203,6 +204,20 @@ body {
   background: var(--raised);
   margin-right: 8px;
   flex-shrink: 0;
+}
+
+.preview.playable {
+  cursor: pointer;
+}
+
+.preview img.cover {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.badge.play {
+  color: var(--ink);
 }
 
 .selection-text {

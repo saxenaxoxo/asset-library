@@ -1,15 +1,34 @@
 // Pure path helpers (unit-tested), shared by the file layer and drag-and-drop.
 
+const DRIVE = /^[A-Za-z]:[\\/]/
+const UNC = /^[\\/]{2}[^\\/]+[\\/]/
+
+function encodeSegments(segments: string[]): string {
+  return segments.map((segment) => encodeURIComponent(segment)).join('/')
+}
+
+/**
+ * The URL path for a local file, every segment percent-encoded (so `#`, `?` and `%` survive):
+ * `/Volumes/a b` → `/Volumes/a%20b`, `C:\x` → `/C:/x`, `\\server\share\x` → `//server/share/x`.
+ */
+function urlPath(path: string): string {
+  if (DRIVE.test(path)) {
+    const [drive = '', ...rest] = path.split(/[\\/]/)
+    return `/${drive}/${encodeSegments(rest)}`
+  }
+  if (UNC.test(path)) return `//${encodeSegments(path.slice(2).split(/[\\/]/))}`
+  return encodeSegments(path.split('/'))
+}
+
 /** Converts a local path to a file:// URI the way Premiere's drag-and-drop expects. */
 export function fileUri(path: string): string {
-  const normalized = /^[A-Za-z]:\\/.test(path) ? `/${path.replace(/\\/g, '/')}` : path
-  return `file://${encodeURI(normalized)}`
+  const encoded = urlPath(path)
+  return encoded.startsWith('//') ? `file:${encoded}` : `file://${encoded}`
 }
 
 /** The `file:` URL form UXP uses for <img>/<video> sources and file entries. */
 export function fileUrl(path: string): string {
-  const normalized = /^[A-Za-z]:\\/.test(path) ? `/${path.replace(/\\/g, '/')}` : path
-  return `file:${encodeURI(normalized)}`
+  return `file:${urlPath(path)}`
 }
 
 /**
@@ -61,9 +80,14 @@ export function hostMajor(version: string): number {
 /** Panel drag-to-timeline is only available from Premiere Pro 27.0. */
 export const DRAG_MIN_MAJOR = 27
 
-/** Compares media paths as Premiere may report them (case and slash differences on Windows). */
+/**
+ * Compares media paths as Premiere may report them: Unicode-normalized (macOS can hand back
+ * decomposed accents), and case/slash-insensitive on Windows.
+ */
 export function samePath(a: string, b: string, windows: boolean): boolean {
-  if (!windows) return a === b
-  const norm = (p: string): string => p.replace(/\//g, '\\').toLowerCase()
+  const norm = (p: string): string => {
+    const nfc = p.normalize('NFC')
+    return windows ? nfc.replace(/\//g, '\\').toLowerCase() : nfc
+  }
   return norm(a) === norm(b)
 }

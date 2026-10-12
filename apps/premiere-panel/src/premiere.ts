@@ -1,11 +1,12 @@
 // Everything that talks to Premiere Pro. Kept small so it's easy to verify in the host.
 import type { FolderItem, ProjectItem } from '@adobe/premierepro'
 import type { CatalogAsset } from '@catalog/types'
+import { detectWindows } from './host'
 import { samePath } from './paths'
 
 const ppro = require('premierepro')
 const BIN_NAME = 'Asset Library'
-const WINDOWS = navigator.platform.toLowerCase().startsWith('win')
+const WINDOWS = detectWindows()
 
 /** A problem the editor can fix (shown as-is in the panel). */
 export class UserError extends Error {}
@@ -41,15 +42,45 @@ async function getOrCreateBin(): Promise<FolderItem> {
   return created
 }
 
-async function findClip(bin: FolderItem, path: string): Promise<ProjectItem | null> {
-  for (const item of await bin.getItems()) {
-    const clip = ppro.ClipProjectItem.cast(item)
-    if (!clip) continue
+/** Project item IDs this panel imported, by original path (so a retry never imports twice). */
+const importedIds = new Map<string, string>()
+
+function itemId(item: ProjectItem): string | null {
+  try {
+    return item.getId() || null
+  } catch {
+    return null
+  }
+}
+
+async function clipsIn(bin: FolderItem): Promise<ProjectItem[]> {
+  return (await bin.getItems()).filter((item) => {
     try {
-      if (samePath(await clip.getMediaFilePath(), path, WINDOWS)) return item
+      return !!ppro.ClipProjectItem.cast(item)
     } catch {
-      // Not a media clip (e.g. a sequence); skip it.
+      return false // folders and other non-clip items
     }
+  })
+}
+
+async function matchesPath(item: ProjectItem, path: string): Promise<boolean> {
+  try {
+    const clip = ppro.ClipProjectItem.cast(item)
+    return !!clip && samePath(await clip.getMediaFilePath(), path, WINDOWS)
+  } catch {
+    return false // not a media clip (e.g. a sequence)
+  }
+}
+
+async function findClip(bin: FolderItem, path: string): Promise<ProjectItem | null> {
+  const clips = await clipsIn(bin)
+  const knownId = importedIds.get(path)
+  if (knownId) {
+    const known = clips.find((item) => itemId(item) === knownId)
+    if (known) return known
+  }
+  for (const item of clips) {
+    if (await matchesPath(item, path)) return item
   }
   return null
 }
@@ -61,13 +92,32 @@ export async function importOnce(asset: CatalogAsset): Promise<ProjectItem> {
   const bin = await getOrCreateBin()
   const existing = await findClip(bin, asset.path)
   if (existing) return existing
+
+  // Note what's in the bin first, so the new clip can be told apart even if Premiere reports
+  // its path differently (case, slashes, Unicode form).
+  const before = await clipsIn(bin)
+  const beforeIds = new Set(before.map(itemId))
   const ok = await project.importFiles([asset.path], true, ppro.ProjectItem.cast(bin), false)
   if (!ok)
     throw new UserError(
       `Premiere couldn't import ${asset.name}. Check that the drive is connected.`
     )
-  const imported = await findClip(bin, asset.path)
+  const after = await clipsIn(bin)
+  const added = after.filter((item) => {
+    const id = itemId(item)
+    return id ? !beforeIds.has(id) : !before.includes(item)
+  })
+  let imported: ProjectItem | null = null
+  for (const item of added) {
+    if (await matchesPath(item, asset.path)) {
+      imported = item
+      break
+    }
+  }
+  imported ??= added.length === 1 ? (added[0] ?? null) : await findClip(bin, asset.path)
   if (!imported) throw new Error(`Imported ${asset.name}, but couldn't find it in the bin.`)
+  const id = itemId(imported)
+  if (id) importedIds.set(asset.path, id)
   return imported
 }
 
@@ -84,9 +134,14 @@ export async function insertAtPlayhead(
 
   if (asset.name.toLowerCase().endsWith('.mogrt')) {
     const time = await sequence.getPlayerPosition()
+    let added: unknown = null
     project.lockedAccess(() => {
-      editor.insertMogrtFromPath(asset.path, time, options.videoTrack, options.audioTrack)
+      added = editor.insertMogrtFromPath(asset.path, time, options.videoTrack, options.audioTrack)
     })
+    if (!added || (Array.isArray(added) && added.length === 0))
+      throw new UserError(
+        `Premiere couldn't add ${asset.name}. Check that the template opens in Premiere and the target track isn't locked.`
+      )
     return `Added ${asset.name} at the playhead.`
   }
   if (asset.kind === 'template') {

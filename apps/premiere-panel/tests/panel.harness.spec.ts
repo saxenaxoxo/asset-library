@@ -146,5 +146,24 @@ test('panel lists the library, searches, and places the selection at the playhea
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __calls: unknown[] }).__calls.length))
     .toBe(3)
+
+  // Tiles survive re-renders, so selecting one keeps the same node (and its loaded image).
+  const whoosh = page.locator('.tile', { hasText: 'Whoosh Big.wav' })
+  const node = await whoosh.elementHandle()
+  await whoosh.click()
+  await expect(whoosh).toHaveClass(/selected/)
+  expect(await node?.evaluate((n) => n.isConnected)).toBe(true)
+
+  // Enter inside a menu belongs to the menu, not to "add at playhead".
+  await page.locator('select[aria-label="Video track"]').dispatchEvent('keydown', { key: 'Enter' })
+  await page.waitForTimeout(300)
+  expect(
+    await page.evaluate(() => (window as unknown as { __calls: unknown[] }).__calls.length)
+  ).toBe(3)
+  // ...while Enter elsewhere still adds the selection (imports Whoosh, then places it).
+  await page.locator('.grid').dispatchEvent('keydown', { key: 'Enter' })
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __calls: unknown[] }).__calls.length))
+    .toBe(5)
   await app.close()
 })

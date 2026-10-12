@@ -2,7 +2,7 @@
 const fs = require('fs')
 
 const calls = []
-const toPath = (p) => decodeURI(String(p).replace(/^file:(\/\/)?/, ''))
+const toPath = (p) => decodeURIComponent(String(p).replace(/^file:(\/\/)?/, ''))
 
 function makeFolder(name) {
   return {
@@ -32,7 +32,10 @@ const editor = {
     a,
     limit
   }),
-  insertMogrtFromPath: (p, time, v, a) => calls.push({ type: 'mogrt', path: p, v, a })
+  insertMogrtFromPath: (p, time, v, a) => {
+    calls.push({ type: 'mogrt', path: p, v, a })
+    return [{ type: 'mogrt-track-item' }]
+  }
 }
 const project = {
   getRootItem: async () => root,
@@ -40,7 +43,13 @@ const project = {
   importFiles: async (paths, suppressUI, bin) => {
     calls.push({ type: 'import', paths, bin: bin.name })
     for (const p of paths) {
-      bin.items.push({ __clip: true, name: p.split('/').pop(), getMediaFilePath: async () => p })
+      const id = `clip-${bin.items.length + 1}`
+      bin.items.push({
+        __clip: true,
+        name: p.split('/').pop(),
+        getId: () => id,
+        getMediaFilePath: async () => p
+      })
     }
     return true
   },
