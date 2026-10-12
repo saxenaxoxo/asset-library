@@ -15,13 +15,13 @@ export function DragTest(): React.JSX.Element {
   }
 
   return (
-    <section className="flex flex-1 flex-col gap-5 overflow-y-auto px-8 py-8">
+    <section className="flex flex-col gap-5 px-8 py-8">
       <div className="max-w-[560px]">
         <h2 className="text-lg font-semibold">Drag-out test</h2>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
-          Choose a few files, then drag them from here into Premiere Pro&apos;s Project panel or
-          timeline, or into After Effects. The original files are used; nothing is copied or
-          changed.
+          Check drag-and-drop with any files, even ones outside your library. Drag them into
+          Premiere Pro&apos;s Project panel or timeline, or into After Effects. The original files
+          are used; nothing is copied or changed.
         </p>
         <button
           type="button"

@@ -30,7 +30,25 @@ test('launches into the branded empty library', async () => {
     await page.evaluate(() =>
       Object.keys((globalThis as unknown as { assetLibrary: object }).assetLibrary).sort()
     )
-  ).toEqual(['getAppInfo', 'getDiagnostics', 'pickDragTestFiles', 'pickFolder', 'startDrag'])
+  ).toEqual([
+    'addFolder',
+    'addTag',
+    'getAppInfo',
+    'getAsset',
+    'getCounts',
+    'getDiagnostics',
+    'listRoots',
+    'listTags',
+    'onLibraryEvent',
+    'pickDragTestFiles',
+    'queryAssets',
+    'removeRoot',
+    'removeTag',
+    'rescan',
+    'revealAsset',
+    'setFavorite',
+    'startDrag'
+  ])
 
   // The native SQLite module loads inside Electron, with full-text search.
   const diagnostics = await page.evaluate(() =>

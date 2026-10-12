@@ -5,7 +5,12 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { applySecurityPolicies, isTrustedSenderUrl } from './security'
 import { createMainWindow, RENDERER_INDEX } from './window'
 import { registerIpcHandlers } from './ipc'
+import { copyFileSync, existsSync } from 'fs'
 import { openDatabase } from './library/database'
+import { migrate, needsMigration } from './library/migrations'
+import { LibraryRepository } from './library/repository'
+import { LibraryService } from './library/service'
+import { LIBRARY_EVENT_CHANNEL } from '@shared/channels'
 import { WorkerClient } from './worker/client'
 import { mediaBinaries } from './media/binaries'
 
@@ -32,7 +37,15 @@ if (!app.requestSingleInstanceLock()) {
     // F12 toggles DevTools in development; Cmd/Ctrl+R reload is disabled in production.
     app.on('browser-window-created', (_event, window) => optimizer.watchWindowShortcuts(window))
 
-    const db = openDatabase(join(app.getPath('userData'), 'library.db'))
+    const dbFile = join(app.getPath('userData'), 'library.db')
+    const db = openDatabase(dbFile)
+    // Keep a copy before changing the schema, so a failed upgrade can be recovered by hand.
+    if (needsMigration(db) && existsSync(dbFile)) {
+      db.pragma('wal_checkpoint(TRUNCATE)')
+      copyFileSync(dbFile, `${dbFile}.bak`)
+    }
+    migrate(db)
+    const repo = new LibraryRepository(db)
     const worker = new WorkerClient()
     const binaries = mediaBinaries({
       packaged: app.isPackaged,
@@ -41,6 +54,11 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
       arch: process.arch
     })
+    const library = new LibraryService(repo, worker, binaries, (event) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(LIBRARY_EVENT_CHANNEL, event)
+      }
+    })
     app.on('will-quit', () => {
       worker.stop()
       db.close()
@@ -48,9 +66,13 @@ if (!app.requestSingleInstanceLock()) {
 
     registerIpcHandlers(
       (event) => isTrustedSenderUrl(event.senderFrame?.url, devServerUrl, rendererFileUrlPrefix),
-      { db, worker, binaries }
+      { db, repo, library, worker, binaries }
     )
     createMainWindow(devServerUrl)
+    library.start()
+    // Automated tests point the app at a fixture folder (there's no way to drive the OS folder picker).
+    const testRoot = process.env['ASSET_LIBRARY_TEST_ROOT']
+    if (testRoot && repo.listRoots().length === 0) void library.addRoot(testRoot)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow(devServerUrl)

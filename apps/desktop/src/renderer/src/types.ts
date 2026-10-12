@@ -1,8 +1,3 @@
-export interface LibraryRoot {
-  path: string
-  name: string
-}
-
 export type ViewId =
   | 'all'
   | 'favorites'
@@ -13,8 +8,7 @@ export type ViewId =
   | 'templates'
   | 'missing'
   | 'settings'
-  | `root:${string}`
+  | `root:${number}`
+  | `tag:${string}`
 
 export type ViewMode = 'grid' | 'list'
-
-export type SortKey = 'added' | 'name' | 'modified' | 'size' | 'duration'

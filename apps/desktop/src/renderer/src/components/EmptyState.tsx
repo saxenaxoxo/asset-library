@@ -2,7 +2,6 @@ import { FolderPlus } from 'lucide-react'
 
 interface EmptyStateProps {
   onAddFolder: () => void
-  lastAddedName: string | null
 }
 
 /**
@@ -39,7 +38,7 @@ function Shelf(): React.JSX.Element {
   )
 }
 
-export function EmptyState({ onAddFolder, lastAddedName }: EmptyStateProps): React.JSX.Element {
+export function EmptyState({ onAddFolder }: EmptyStateProps): React.JSX.Element {
   return (
     <section className="flex flex-1 items-center justify-center px-12">
       <div className="flex max-w-[920px] items-center gap-16">
@@ -59,10 +58,8 @@ export function EmptyState({ onAddFolder, lastAddedName }: EmptyStateProps): Rea
             <FolderPlus size={16} />
             Add folder
           </button>
-          <p className="mt-4 text-xs text-ink-3" role="status">
-            {lastAddedName
-              ? `Added ${lastAddedName}. Scanning arrives in the next build.`
-              : 'Video, audio, images and templates. Your files stay where they are.'}
+          <p className="mt-4 text-xs text-ink-3">
+            Video, audio, images and templates. Your files stay where they are.
           </p>
         </div>
         <Shelf />

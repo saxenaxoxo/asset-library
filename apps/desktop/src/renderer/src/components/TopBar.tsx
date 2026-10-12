@@ -1,6 +1,7 @@
 import { forwardRef } from 'react'
 import { LayoutGrid, List, RefreshCw, Search } from 'lucide-react'
-import type { SortKey, ViewMode } from '../types'
+import type { AssetSort } from '@shared/library'
+import type { ViewMode } from '../types'
 
 interface TopBarProps {
   title: string
@@ -8,13 +9,13 @@ interface TopBarProps {
   onQueryChange: (query: string) => void
   viewMode: ViewMode
   onViewModeChange: (mode: ViewMode) => void
-  sort: SortKey
-  onSortChange: (sort: SortKey) => void
+  sort: AssetSort
+  onSortChange: (sort: AssetSort) => void
   onRescan: () => void
   isMac: boolean
 }
 
-const SORT_LABELS: Record<SortKey, string> = {
+const SORT_LABELS: Record<AssetSort, string> = {
   added: 'Date added',
   name: 'Name',
   modified: 'Date modified',
@@ -76,7 +77,7 @@ export const TopBar = forwardRef<HTMLInputElement, TopBarProps>(function TopBar(
       <select
         aria-label="Sort by"
         value={sort}
-        onChange={(event) => onSortChange(event.target.value as SortKey)}
+        onChange={(event) => onSortChange(event.target.value as AssetSort)}
         className="no-drag h-8 rounded-md border border-line bg-canvas px-2 text-sm text-ink-2 focus:border-brand-500 focus:outline-none"
       >
         {Object.entries(SORT_LABELS).map(([key, label]) => (

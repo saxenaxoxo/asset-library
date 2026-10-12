@@ -4,67 +4,71 @@ import {
   Clock3,
   Film,
   Folder,
+  HardDrive,
   Image,
   Layers,
   LayoutGrid,
+  LoaderCircle,
   Plus,
-  Settings,
   SearchX,
-  Star
+  Settings,
+  Star,
+  Tag,
+  Trash2,
+  Unplug
 } from 'lucide-react'
 import { brand } from '@brand/brand-config'
+import type { LibraryCounts, RootRecord, TagCount } from '@shared/library'
 import { BrandMark } from './BrandMark'
-import type { LibraryRoot, ViewId } from '../types'
+import type { ViewId } from '../types'
 
 interface SidebarProps {
   activeView: ViewId
   onSelectView: (view: ViewId) => void
-  roots: LibraryRoot[]
+  roots: RootRecord[]
+  counts: LibraryCounts | null
+  tags: TagCount[]
   onAddFolder: () => void
+  onRemoveRoot: (root: RootRecord) => void
 }
-
-interface NavEntry {
-  id: ViewId
-  label: string
-  icon: LucideIcon
-}
-
-const LIBRARY: NavEntry[] = [
-  { id: 'all', label: 'All assets', icon: LayoutGrid },
-  { id: 'favorites', label: 'Favorites', icon: Star },
-  { id: 'recent', label: 'Recently added', icon: Clock3 }
-]
-
-const TYPES: NavEntry[] = [
-  { id: 'video', label: 'Video', icon: Film },
-  { id: 'audio', label: 'Audio', icon: AudioLines },
-  { id: 'images', label: 'Images', icon: Image },
-  { id: 'templates', label: 'Templates and presets', icon: Layers }
-]
 
 function NavItem({
   icon: Icon,
   label,
+  count,
   active,
-  onClick
+  onClick,
+  trailing,
+  dim
 }: {
   icon: LucideIcon
   label: string
+  count?: number
   active: boolean
   onClick: () => void
+  trailing?: React.ReactNode
+  dim?: boolean
 }): React.JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? 'page' : undefined}
-      className={`flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm transition-colors ${
-        active ? 'bg-brand-surface text-ink' : 'text-ink-2 hover:bg-raised hover:text-ink'
-      }`}
-    >
-      <Icon size={16} strokeWidth={1.75} className={active ? 'text-brand-300' : 'text-ink-3'} />
-      <span className="truncate">{label}</span>
-    </button>
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-current={active ? 'page' : undefined}
+        className={`flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm transition-colors ${
+          active ? 'bg-brand-surface text-ink' : 'text-ink-2 hover:bg-raised hover:text-ink'
+        } ${dim ? 'opacity-60' : ''}`}
+      >
+        <Icon size={16} strokeWidth={1.75} className={active ? 'text-brand-300' : 'text-ink-3'} />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {count !== undefined && count > 0 && (
+          <span className="text-2xs text-ink-3 group-hover:opacity-0">
+            {count.toLocaleString()}
+          </span>
+        )}
+      </button>
+      {trailing}
+    </div>
   )
 }
 
@@ -87,8 +91,22 @@ export function Sidebar({
   activeView,
   onSelectView,
   roots,
-  onAddFolder
+  counts,
+  tags,
+  onAddFolder,
+  onRemoveRoot
 }: SidebarProps): React.JSX.Element {
+  const nav = (id: ViewId, label: string, icon: LucideIcon, count?: number): React.JSX.Element => (
+    <NavItem
+      key={id}
+      icon={icon}
+      label={label}
+      count={count}
+      active={activeView === id}
+      onClick={() => onSelectView(id)}
+    />
+  )
+
   return (
     <aside className="flex w-[232px] shrink-0 flex-col border-r border-line bg-panel">
       {/* Space for the macOS traffic lights; also lets the window be dragged from here. */}
@@ -104,26 +122,17 @@ export function Sidebar({
 
       <nav aria-label="Library" className="flex-1 overflow-y-auto px-2 pb-2">
         <div className="mt-2 space-y-0.5">
-          {LIBRARY.map((entry) => (
-            <NavItem
-              key={entry.id}
-              {...entry}
-              active={activeView === entry.id}
-              onClick={() => onSelectView(entry.id)}
-            />
-          ))}
+          {nav('all', 'All assets', LayoutGrid, counts?.total)}
+          {nav('favorites', 'Favorites', Star, counts?.favorites)}
+          {nav('recent', 'Recently added', Clock3)}
         </div>
 
         <SectionHeading>Types</SectionHeading>
         <div className="space-y-0.5">
-          {TYPES.map((entry) => (
-            <NavItem
-              key={entry.id}
-              {...entry}
-              active={activeView === entry.id}
-              onClick={() => onSelectView(entry.id)}
-            />
-          ))}
+          {nav('video', 'Video', Film, counts?.video)}
+          {nav('audio', 'Audio', AudioLines, counts?.audio)}
+          {nav('images', 'Images', Image, counts?.image)}
+          {nav('templates', 'Templates and presets', Layers, counts?.template)}
         </div>
 
         <SectionHeading
@@ -144,37 +153,55 @@ export function Sidebar({
         {roots.length === 0 ? (
           <p className="px-2.5 text-xs text-ink-3">No folders yet</p>
         ) : (
-          <ul className="space-y-0.5">
-            {roots.map((root) => (
-              <li key={root.path}>
+          <div className="space-y-0.5">
+            {roots.map((root) => {
+              const id: ViewId = `root:${root.id}`
+              const icon = root.scanning
+                ? LoaderCircle
+                : root.status === 'offline'
+                  ? Unplug
+                  : root.path.startsWith('/Volumes/')
+                    ? HardDrive
+                    : Folder
+              return (
                 <NavItem
-                  icon={Folder}
-                  label={root.name}
-                  active={activeView === `root:${root.path}`}
-                  onClick={() => onSelectView(`root:${root.path}`)}
+                  key={root.id}
+                  icon={icon}
+                  label={root.label}
+                  count={root.assetCount}
+                  dim={root.status === 'offline'}
+                  active={activeView === id}
+                  onClick={() => onSelectView(id)}
+                  trailing={
+                    <button
+                      type="button"
+                      onClick={() => onRemoveRoot(root)}
+                      aria-label={`Remove ${root.label} from the library`}
+                      title="Remove from library (files stay on disk)"
+                      className="absolute top-1.5 right-1.5 hidden rounded p-1 text-ink-3 group-hover:block hover:bg-canvas hover:text-ink"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  }
                 />
-              </li>
-            ))}
-          </ul>
+              )
+            })}
+          </div>
         )}
 
         <SectionHeading>Tags</SectionHeading>
-        <p className="px-2.5 text-xs text-ink-3">Tags you add appear here</p>
+        {tags.length === 0 ? (
+          <p className="px-2.5 text-xs text-ink-3">Tags you add appear here</p>
+        ) : (
+          <div className="space-y-0.5">
+            {tags.map((tag) => nav(`tag:${tag.name}`, tag.name, Tag, tag.count))}
+          </div>
+        )}
       </nav>
 
       <div className="space-y-0.5 border-t border-line px-2 py-2">
-        <NavItem
-          icon={SearchX}
-          label="Missing"
-          active={activeView === 'missing'}
-          onClick={() => onSelectView('missing')}
-        />
-        <NavItem
-          icon={Settings}
-          label="Settings"
-          active={activeView === 'settings'}
-          onClick={() => onSelectView('settings')}
-        />
+        {nav('missing', 'Missing', SearchX, counts?.missing)}
+        {nav('settings', 'Settings', Settings)}
       </div>
     </aside>
   )
