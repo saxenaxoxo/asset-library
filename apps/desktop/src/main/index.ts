@@ -72,6 +72,8 @@ if (!app.requestSingleInstanceLock()) {
       }
     )
     app.on('will-quit', () => {
+      // Order matters: stop scheduling work, stop the worker, then close the database.
+      library.stop()
       worker.stop()
       db.close()
     })

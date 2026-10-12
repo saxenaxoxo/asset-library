@@ -27,6 +27,8 @@ export class LibraryService {
   private changeTimer: NodeJS.Timeout | null = null
   private generating = false
   private catalogTimer: NodeJS.Timeout | null = null
+  /** Set on quit. After this, late results from the worker are ignored: the database is closing. */
+  private stopped = false
 
   constructor(
     private readonly repo: LibraryRepository,
@@ -35,6 +37,15 @@ export class LibraryService {
     private readonly paths: { mediaDir: string; catalogDir: string; appVersion: string },
     private readonly emit: (event: LibraryEvent) => void
   ) {}
+
+  /** Call before closing the database: cancels pending timers and ignores late worker results. */
+  stop(): void {
+    this.stopped = true
+    if (this.changeTimer) clearTimeout(this.changeTimer)
+    if (this.catalogTimer) clearTimeout(this.catalogTimer)
+    this.changeTimer = null
+    this.catalogTimer = null
+  }
 
   /** Call once at start-up: tidies up after a crash, then refreshes every root in the background. */
   start(): void {
@@ -84,16 +95,19 @@ export class LibraryService {
           known: this.repo.knownFiles(rootId)
         },
         (entries) => {
+          if (this.stopped) return
           this.repo.applyScanBatch(rootId, scanId, entries)
           filesSeen += entries.length
           this.emitProgress({ rootId, state: 'scanning', filesSeen })
           this.notifyChanged()
         }
       )
+      if (this.stopped) return
       const summary = this.repo.finishScan(rootId, scanId)
       this.emitProgress({ rootId, state: 'done', ...summary })
       void this.probePending()
     } catch (error) {
+      if (this.stopped) return
       this.repo.abortScan(scanId)
       if (error instanceof WorkerError && error.code === 'root-unavailable') {
         this.repo.setRootStatus(rootId, 'offline')
@@ -122,7 +136,7 @@ export class LibraryService {
     if (this.probing) return
     this.probing = true
     try {
-      for (;;) {
+      while (!this.stopped) {
         const batch = this.repo.pendingProbes(PROBE_BATCH)
         if (batch.length === 0) break
         const queue = [...batch]
@@ -135,8 +149,10 @@ export class LibraryService {
                 ffprobePath: this.binaries.ffprobe,
                 path: job.path
               })
+              if (this.stopped) return
               this.repo.saveProbe(job.id, parseProbe(json, job.kind))
             } catch {
+              if (this.stopped) return
               this.repo.saveProbeError(
                 job.id,
                 "Couldn't read this file's media details. It may be damaged or still downloading."
@@ -150,7 +166,7 @@ export class LibraryService {
     } finally {
       this.probing = false
     }
-    void this.generateMedia()
+    if (!this.stopped) void this.generateMedia()
   }
 
   /** Generates thumbnails, scrub sprites, previews and waveforms, one asset at a time. */
@@ -158,7 +174,7 @@ export class LibraryService {
     if (this.generating) return
     this.generating = true
     try {
-      for (;;) {
+      while (!this.stopped) {
         const batch = this.repo.pendingMedia(MEDIA_BATCH)
         if (batch.length === 0) break
         for (const asset of batch) {
@@ -176,6 +192,7 @@ export class LibraryService {
               outDir: this.paths.mediaDir,
               jobs
             })
+            if (this.stopped) return
             this.repo.saveMedia(asset.id, asset.key, {
               thumb: files.thumb ?? null,
               sprite: files.sprite ?? null,
@@ -183,6 +200,7 @@ export class LibraryService {
               wave: files.wave ?? null
             })
           } catch {
+            if (this.stopped) return
             this.repo.saveMediaError(asset.id)
           }
         }
@@ -195,11 +213,17 @@ export class LibraryService {
 
   /** Rewrites the panel's catalog shortly after the library settles. */
   private scheduleCatalog(): void {
+    if (this.stopped) return
     if (this.catalogTimer) clearTimeout(this.catalogTimer)
     this.catalogTimer = setTimeout(() => {
       this.catalogTimer = null
-      const catalog = buildCatalog(this.repo, this.paths.mediaDir, this.paths.appVersion)
-      writeCatalog(this.paths.catalogDir, catalog).catch(() => undefined)
+      if (this.stopped) return
+      try {
+        const catalog = buildCatalog(this.repo, this.paths.mediaDir, this.paths.appVersion)
+        writeCatalog(this.paths.catalogDir, catalog).catch(() => undefined)
+      } catch {
+        // A failed catalog write must never take the app down; the next change retries it.
+      }
     }, CATALOG_DEBOUNCE_MS)
   }
 
@@ -209,9 +233,10 @@ export class LibraryService {
 
   /** Coalesces bursts of changes (scan batches, probes) into one UI refresh. */
   private notifyChanged(): void {
-    if (this.changeTimer) return
+    if (this.stopped || this.changeTimer) return
     this.changeTimer = setTimeout(() => {
       this.changeTimer = null
+      if (this.stopped) return
       this.emit({ type: 'library-changed' })
       this.scheduleCatalog()
     }, CHANGE_THROTTLE_MS)
