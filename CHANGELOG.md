@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Windows
+
+- Every build now installs the Windows app with the real installer, tests the installed app, and uninstalls it again.
+- Unit tests and the Premiere panel tests also run on Windows; paths with drive letters and network shares (`\\NAS\share`) are covered.
+- Windows FFmpeg is pinned to one checked build (FFmpeg 9.0.2) instead of whatever was newest.
+- No stray menu bar on Windows; the macOS menu is the app's own (Electron's default linked to Electron and opened developer tools).
+- "Show in Explorer" on Windows; After Effects is found wherever Program Files lives.
+- Both installers include the third-party notices, with the FFmpeg license details.
+
 ### Reliability and speed pass
 
 - Drag-out works in the installed app (the drag icon is now packaged); a test guards it.
