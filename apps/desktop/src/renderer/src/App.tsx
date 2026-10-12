@@ -325,6 +325,7 @@ export default function App(): React.JSX.Element {
             <DetailsPanel
               asset={shownAsset}
               root={roots?.find((r) => r.id === shownAsset.rootId)}
+              isMac={appInfo?.platform === 'darwin'}
               onChanged={() => {
                 setRefreshKey((key) => key + 1)
                 reloadLibrary()

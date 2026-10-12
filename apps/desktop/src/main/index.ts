@@ -14,6 +14,7 @@ import { LIBRARY_EVENT_CHANNEL } from '@shared/channels'
 import { handleAssetProtocol, registerAssetScheme } from './media/protocol'
 import { WorkerClient } from './worker/client'
 import { mediaBinaries } from './media/binaries'
+import { applyAppMenu } from './menu'
 
 const devServerUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
 const rendererFileUrlPrefix = pathToFileURL(RENDERER_INDEX).href
@@ -36,6 +37,7 @@ if (!app.requestSingleInstanceLock()) {
     electronApp.setAppUserModelId('com.saxenascreation.assetlibrary')
     nativeTheme.themeSource = 'dark'
     applySecurityPolicies()
+    applyAppMenu(process.platform, app.getName())
 
     // F12 toggles DevTools in development; Cmd/Ctrl+R reload is disabled in production.
     app.on('browser-window-created', (_event, window) => optimizer.watchWindowShortcuts(window))

@@ -33,7 +33,10 @@ export function sortAfterEffectsFolders(names: readonly string[]): string[] {
 export function findAfterEffectsInstalls(
   platform: NodeJS.Platform = process.platform
 ): AfterEffectsInstall[] {
-  const base = platform === 'win32' ? 'C:\\Program Files\\Adobe' : '/Applications'
+  const base =
+    platform === 'win32'
+      ? join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'Adobe')
+      : '/Applications'
   let names: string[]
   try {
     names = sortAfterEffectsFolders(readdirSync(base))

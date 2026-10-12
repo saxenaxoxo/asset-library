@@ -58,3 +58,14 @@ Record ✅ / ❌ (with what happened) next to each line, and copy results into `
 - [ ] Open `Asset-Library-<v>-arm64.dmg`, drag to Applications, open. macOS blocks it the first time →
       **System Settings → Privacy & Security → Open Anyway** works.
 - [ ] Double-click the panel `.ccx` → Creative Cloud installs it → it appears in Premiere.
+
+## 6. Windows (only if you have a Windows PC; 15 min)
+
+Get `Asset-Library-<v>-setup.exe` from the latest **Build** run on GitHub (Actions → Build → Artifacts → `asset-library-windows`).
+
+- [ ] Run the installer. On SmartScreen's "Windows protected your PC" click **More info → Run anyway**. Desktop and Start menu shortcuts appear.
+- [ ] Add a folder (try one on an external drive and, if you use one, a network share like `\\NAS\Assets`). Thumbnails, hover-scrub and previews appear.
+- [ ] Drag a clip from the app into Premiere's timeline and into After Effects.
+- [ ] Install the panel `.ccx` and repeat the panel checks from section 3; the panel finds the library on its own.
+- [ ] **Send to After Effects** works with After Effects open, and asks you to open it when it's closed.
+- [ ] Uninstall from Settings → Apps: the app goes, and your asset files are untouched.

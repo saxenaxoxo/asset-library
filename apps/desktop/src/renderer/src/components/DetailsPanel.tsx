@@ -9,6 +9,7 @@ import { startAssetDrag } from '../lib/drag'
 interface DetailsPanelProps {
   asset: AssetRecord
   root: RootRecord | undefined
+  isMac: boolean
   onChanged: () => void
   onClose: () => void
 }
@@ -31,9 +32,11 @@ const STATUS_MESSAGE: Record<string, string> = {
 export function DetailsPanel({
   asset,
   root,
+  isMac,
   onChanged,
   onClose
 }: DetailsPanelProps): React.JSX.Element {
+  const revealLabel = isMac ? 'Show in Finder' : 'Show in Explorer'
   const [tagDraft, setTagDraft] = useState('')
   const [revealFailed, setRevealFailed] = useState(false)
   const [hosts, setHosts] = useState<Hosts | null>(null)
@@ -143,8 +146,8 @@ export function DetailsPanel({
           <button
             type="button"
             onClick={() => void reveal()}
-            title="Show in Finder or Explorer"
-            aria-label="Show in Finder or Explorer"
+            title={revealLabel}
+            aria-label={revealLabel}
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-line-strong text-ink-2 hover:bg-raised"
           >
             <FolderSearch size={15} />

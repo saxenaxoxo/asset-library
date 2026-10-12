@@ -1,3 +1,4 @@
+import nodePath from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase, type LibraryDatabase } from '../../src/main/library/database'
 import { MIGRATIONS, migrate, SCHEMA_VERSION } from '../../src/main/library/migrations'
@@ -340,13 +341,34 @@ describe('queries', () => {
 })
 
 describe('paths', () => {
-  it('keeps resolved paths inside the root', () => {
-    expect(safeJoin('/Volumes/SSD/Assets', 'SFX/whoosh.wav')).toBe(
+  it('keeps resolved paths inside the root (macOS rules)', () => {
+    const p = nodePath.posix
+    expect(safeJoin('/Volumes/SSD/Assets', 'SFX/whoosh.wav', p)).toBe(
       '/Volumes/SSD/Assets/SFX/whoosh.wav'
     )
-    expect(safeJoin('/Volumes/SSD/Assets', '../../etc/passwd')).toBeNull()
-    expect(safeJoin('/Volumes/SSD/Assets', '/etc/passwd')).toBeNull()
-    expect(safeJoin('/Volumes/SSD/Assets', '')).toBeNull()
+    expect(safeJoin('/Volumes/SSD/Assets', '../../etc/passwd', p)).toBeNull()
+    expect(safeJoin('/Volumes/SSD/Assets', '/etc/passwd', p)).toBeNull()
+    expect(safeJoin('/Volumes/SSD/Assets', '', p)).toBeNull()
+  })
+
+  it('keeps resolved paths inside the root (Windows rules)', () => {
+    const p = nodePath.win32
+    // Stored paths use forward slashes; on Windows they resolve to backslashes.
+    expect(safeJoin('D:\\Assets', 'SFX/whoosh.wav', p)).toBe('D:\\Assets\\SFX\\whoosh.wav')
+    expect(safeJoin('\\\\nas\\share\\Assets', 'SFX/hit.wav', p)).toBe(
+      '\\\\nas\\share\\Assets\\SFX\\hit.wav'
+    )
+    expect(safeJoin('D:\\Assets', '..\\..\\Windows\\win.ini', p)).toBeNull()
+    expect(safeJoin('D:\\Assets', '../Other/a.mov', p)).toBeNull()
+    expect(safeJoin('D:\\Assets', 'C:\\Windows\\win.ini', p)).toBeNull()
+    expect(safeJoin('D:\\Assets', 'C:relative.mov', p)).toBeNull()
+    expect(safeJoin('D:\\Assets', '\\\\evil\\share\\a.mov', p)).toBeNull()
+    expect(safeJoin('\\\\nas\\share\\Assets', '..\\..\\other\\a.mov', p)).toBeNull()
+  })
+
+  it('resolves paths with the platform it runs on', () => {
+    const root = nodePath.resolve('Assets')
+    expect(safeJoin(root, 'SFX/whoosh.wav')).toBe(nodePath.join(root, 'SFX', 'whoosh.wav'))
   })
 
   it('quotes every search word for FTS', () => {

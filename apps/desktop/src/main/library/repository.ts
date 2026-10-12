@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { isAbsolute, relative, resolve, sep } from 'path'
+import nodePath from 'path'
 import type { Statement } from 'better-sqlite3'
 import type { LibraryDatabase } from './database'
 import { extensionOf, kindForFile, type AssetKind } from '@shared/media-types'
@@ -778,13 +778,25 @@ export function mediaKey(fingerprint: string | null): string {
 /** The same key computed in SQL, to check a result still belongs to the current file. */
 const MEDIA_KEY_SQL = `substr(coalesce(fingerprint, 'nofp'), 1, 10)`
 
-/** Joins a root and a relative path, refusing anything that escapes the root. */
-export function safeJoin(rootPath: string, relPath: string): string | null {
-  if (isAbsolute(relPath)) return null
-  const root = resolve(rootPath)
-  const full = resolve(root, relPath)
-  const rel = relative(root, full)
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || rel.split(sep).includes('..'))
+/**
+ * Joins a root and a relative path, refusing anything that escapes the root. `path` is only
+ * swapped in tests, to check Windows rules (drive letters, UNC shares) on any machine.
+ */
+export function safeJoin(
+  rootPath: string,
+  relPath: string,
+  path: typeof nodePath = nodePath
+): string | null {
+  if (path.isAbsolute(relPath)) return null
+  const root = path.resolve(rootPath)
+  const full = path.resolve(root, relPath)
+  const rel = path.relative(root, full)
+  if (
+    rel === '' ||
+    rel.startsWith('..') ||
+    path.isAbsolute(rel) ||
+    rel.split(path.sep).includes('..')
+  )
     return null
   return full
 }
