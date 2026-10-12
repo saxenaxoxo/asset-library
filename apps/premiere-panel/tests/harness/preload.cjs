@@ -15,7 +15,15 @@ function makeFolder(name) {
   }
 }
 const root = makeFolder('root')
-const sequence = { getPlayerPosition: async () => ({ seconds: 12.5 }) }
+let playhead = 12.5
+const sequence = {
+  getPlayerPosition: async () => ({ seconds: playhead }),
+  setPlayerPosition: async (time) => {
+    playhead = time.seconds
+    calls.push({ type: 'playhead', seconds: time.seconds })
+    return true
+  }
+}
 const editor = {
   createOverwriteItemAction: (item, time, v, a) => ({
     type: 'overwrite',
@@ -74,7 +82,8 @@ const modules = {
     FolderItem: { cast: (item) => (item.__folder ? item : null) },
     ClipProjectItem: { cast: (item) => (item.__clip ? item : null) },
     ProjectItem: { cast: (item) => item },
-    SequenceEditor: { getEditor: () => editor }
+    SequenceEditor: { getEditor: () => editor },
+    TickTime: { createWithSeconds: (seconds) => ({ seconds }) }
   },
   uxp: {
     host: { name: 'premierepro', version: process.env.HARNESS_HOST_VERSION || '26.5.2' },

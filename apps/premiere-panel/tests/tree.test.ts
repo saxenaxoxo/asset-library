@@ -16,6 +16,7 @@ import {
   inFolder,
   tagKey
 } from '@catalog/tree'
+import { rangeBetween, recordRecent } from '@catalog/selection'
 import {
   numberedName,
   parseEngineStatus,
@@ -176,6 +177,24 @@ describe('panel requests', () => {
     expect(requestId(1, 0.1)).not.toBe(requestId(1, 0.2))
     expect(numberedName('Whoosh.wav', 2)).toBe('Whoosh 2.wav')
     expect(numberedName('README', 3)).toBe('README 3')
+  })
+})
+
+describe('selection and recents', () => {
+  const order = ['a', 'b', 'c', 'd', 'e']
+
+  it('selects the range between the anchor and the target, either way round', () => {
+    expect(rangeBetween(order, 'b', 'd')).toEqual(['b', 'c', 'd'])
+    expect(rangeBetween(order, 'd', 'b')).toEqual(['b', 'c', 'd'])
+    expect(rangeBetween(order, null, 'c')).toEqual(['c'])
+    expect(rangeBetween(order, 'gone', 'c')).toEqual(['c'])
+    expect(rangeBetween(order, 'a', 'gone')).toEqual([])
+  })
+
+  it('keeps the newest placement first, without repeats, up to the limit', () => {
+    expect(recordRecent(['a', 'b'], 'c')).toEqual(['c', 'a', 'b'])
+    expect(recordRecent(['a', 'b', 'c'], 'b')).toEqual(['b', 'a', 'c'])
+    expect(recordRecent(['a', 'b', 'c'], 'd', 3)).toEqual(['d', 'a', 'b'])
   })
 })
 

@@ -12,6 +12,18 @@ function normalize(value: string): string {
   return value.toLowerCase().normalize('NFKD')
 }
 
+/** Each asset's searchable text, built once per asset record (a 20k-asset search stays instant). */
+const haystacks = new WeakMap<CatalogAsset, string>()
+
+function haystack(asset: CatalogAsset): string {
+  let text = haystacks.get(asset)
+  if (text === undefined) {
+    text = normalize(`${asset.name} ${asset.folder} ${asset.root} ${asset.tags.join(' ')}`)
+    haystacks.set(asset, text)
+  }
+  return text
+}
+
 /**
  * Filters and sorts catalog assets in memory. Every word must appear somewhere in the name,
  * folder, root or tags, so "glitch trans" finds "Glitch Transitions/Glitch 04.mov".
@@ -28,10 +40,8 @@ export function filterAssets(
     if (filter.favoritesOnly && !asset.favorite) return false
     if (filter.tag && !asset.tags.includes(filter.tag)) return false
     if (words.length === 0) return true
-    const haystack = normalize(
-      `${asset.name} ${asset.folder} ${asset.root} ${asset.tags.join(' ')}`
-    )
-    return words.every((word) => haystack.includes(word))
+    const text = haystack(asset)
+    return words.every((word) => text.includes(word))
   })
   const sort = filter.sort ?? 'added'
   return result.sort((a, b) => {

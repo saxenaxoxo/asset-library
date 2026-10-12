@@ -308,5 +308,45 @@ test('panel browses folders, organizes, and places the selection at the playhead
   // ...while Enter elsewhere still adds the selection (imports Whoosh, then places it).
   await page.locator('.grid').dispatchEvent('keydown', { key: 'Enter' })
   await expect.poll(async () => (await calls()).length).toBe(before + 2)
+
+  // Several at once: shift-click selects a range, Enter adds them one after another (the
+  // playhead moves on by each clip's length), and Recent then lists them.
+  await page.locator('.tree-row', { hasText: 'All assets' }).click()
+  await expect(tiles).toHaveCount(3)
+  await page.locator('.tile', { hasText: 'Glitch 04.mov' }).click()
+  await page.locator('.tile', { hasText: 'Whoosh Big.wav' }).click({ modifiers: ['Shift'] })
+  await expect(page.locator('.tile.selected')).toHaveCount(3)
+  await expect(page.locator('.controls .button.primary')).toHaveText('Add 3 at playhead')
+  const placed = (await calls()).length
+  await page.locator('.grid').dispatchEvent('keydown', { key: 'Enter' })
+  // Glitch: import + overwrite; Light Leak and Whoosh are imported already; 3 playhead moves.
+  await expect.poll(async () => (await calls()).length).toBe(placed + 7)
+  expect((await calls()).filter((c) => c.type === 'playhead')).toHaveLength(3)
+  await expect(page.locator('.status.ok')).toContainText('Added 3 assets')
+  await page.locator('.tree-row', { hasText: 'Recent' }).click()
+  await expect(tiles).toHaveCount(3)
+
+  // The type menu narrows the grid; a search can look in the folder or everywhere.
+  await page.locator('.tree-row', { hasText: 'All assets' }).click()
+  await page.selectOption('.type-select', 'audio')
+  await expect(tiles).toHaveCount(1)
+  await page.selectOption('.type-select', 'all')
+  await expect(tiles).toHaveCount(3)
+  await page.locator('.tree-row.folder', { hasText: 'SFX' }).click()
+  await page.fill('.search', 'leak')
+  await expect(tiles).toHaveCount(0)
+  await page.selectOption('.scope-select', 'all')
+  await expect(tiles).toHaveCount(1)
+  await page.selectOption('.scope-select', 'folder')
+  await page.fill('.search', '')
+  await expect(tiles).toHaveCount(1)
+
+  // Sound plays through the engine; Escape clears the selection.
+  await page.locator('.tile', { hasText: 'Whoosh Big.wav' }).locator('.play').click()
+  await expect.poll(() => requests().at(-1)).toEqual({ type: 'play-audio', id: 'c' })
+  await page.locator('.tile', { hasText: 'Whoosh Big.wav' }).click()
+  await expect(page.locator('.tile.selected')).toHaveCount(1)
+  await page.locator('.grid').dispatchEvent('keydown', { key: 'Escape' })
+  await expect(page.locator('.tile.selected')).toHaveCount(0)
   await app.close()
 })

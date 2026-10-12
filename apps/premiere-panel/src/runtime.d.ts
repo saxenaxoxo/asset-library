@@ -11,6 +11,7 @@ interface UxpEntry {
   read(options?: { format?: unknown }): Promise<string | ArrayBuffer>
   write(data: string, options?: { format?: unknown }): Promise<unknown>
   createFile(name: string, options?: { overwrite?: boolean }): Promise<UxpEntry>
+  delete(): Promise<unknown>
 }
 
 interface UxpModule {
@@ -37,4 +38,5 @@ interface UxpFs {
   lstat(path: string): Promise<{ mtimeMs?: number; mtime?: Date; size?: number }>
   writeFile(path: string, data: string, options?: { encoding?: string }): Promise<unknown>
   mkdir(path: string, options?: { recursive?: boolean }): Promise<unknown>
+  unlink(path: string): Promise<unknown>
 }

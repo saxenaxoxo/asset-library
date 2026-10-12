@@ -176,6 +176,39 @@ export async function insertAtPlayhead(
   return `${options.mode === 'insert' ? 'Inserted' : 'Placed'} ${asset.name} at the playhead.`
 }
 
+/**
+ * Places several assets one after another from the playhead: each one moves the playhead by
+ * its own length before the next goes in. Stops at the first problem and says how far it got.
+ */
+export async function placeAtPlayhead(
+  assets: CatalogAsset[],
+  options: InsertOptions
+): Promise<string> {
+  if (assets.length === 1) return insertAtPlayhead(assets[0] as CatalogAsset, options)
+  const project = await ppro.Project.getActiveProject()
+  if (!project) throw new UserError('Open a project in Premiere Pro first.')
+  const sequence = await project.getActiveSequence()
+  if (!sequence) throw new UserError('Open a sequence, then try again.')
+  let done = 0
+  for (const asset of assets) {
+    try {
+      await insertAtPlayhead(asset, options)
+    } catch (error) {
+      if (done === 0) throw error
+      const reason = error instanceof UserError ? error.message : (error as Error).message
+      throw new UserError(`Added ${done} of ${assets.length}, then stopped at ${asset.name}: ${reason}`)
+    }
+    done++
+    if (asset.durationMs && asset.durationMs > 0 && typeof sequence.setPlayerPosition === 'function') {
+      const at = await sequence.getPlayerPosition()
+      await sequence.setPlayerPosition(
+        ppro.TickTime.createWithSeconds(at.seconds + asset.durationMs / 1000)
+      )
+    }
+  }
+  return `Added ${done} assets at the playhead.`
+}
+
 /** Imports into the project without touching the timeline. */
 export async function importOnly(asset: CatalogAsset): Promise<string> {
   if (asset.kind === 'template' && !asset.name.toLowerCase().endsWith('.mogrt')) {

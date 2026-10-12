@@ -1,9 +1,15 @@
 // Asset Library panel for Premiere Pro: the whole product. Browse the library like a file
 // manager, preview, organize (favorites, tags, folders), import, and put assets on the timeline.
 // A background engine does the indexing and thumbnails; the panel talks to it through files.
-import type { Catalog, CatalogAsset } from '@catalog/types'
-import { SPRITE_FRAMES } from '@catalog/types'
-import { filterAssets, formatDuration, type CatalogFilter } from '@catalog/filter'
+import type { Catalog, CatalogAsset, CatalogKind } from '@catalog/types'
+import {
+  applyCatalogDelta,
+  CATALOG_DELTA_FILE,
+  parseCatalogDelta,
+  SPRITE_FRAMES
+} from '@catalog/types'
+import { filterAssets, formatDuration } from '@catalog/filter'
+import { rangeBetween, recordRecent, RECENT_KEY } from '@catalog/selection'
 import {
   ALL_KEY,
   buildFolderTree,
@@ -20,18 +26,21 @@ import type { EngineStatus, PanelRequest } from '@catalog/requests'
 import {
   chooseCatalog,
   fileMissing,
+  joinPath,
   loadCatalog,
   locateCatalog,
   mimeFor,
   modifiedTime,
   pickFiles,
   pickFolder,
-  showLocalImage
+  readText,
+  showLocalImage,
+  splitPath
 } from './files'
 import { detectWindows, storage } from './host'
-import { insertAtPlayhead, UserError, type InsertOptions } from './premiere'
+import { placeAtPlayhead, UserError, type InsertOptions } from './premiere'
 import { dragContentType, DRAG_MIN_MAJOR, fileUri, hostMajor, samePath } from './paths'
-import { engineRunning, readEngineStatus, sendRequest, startEngine } from './engine'
+import { engineRunning, readEngineStatus, removeRequest, sendRequest, startEngine } from './engine'
 import { installDiagnostics, note } from './diag'
 
 /** Set by the build: true only for a `--diag` build. */
@@ -40,7 +49,7 @@ declare const PANEL_DIAG: boolean
 const uxp = require('uxp')
 const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
 const WINDOWS = detectWindows()
-const PANEL_VERSION = '0.3.21'
+const PANEL_VERSION = '0.3.22'
 
 const TILE_SIZES = { min: 80, max: 240, default: 120 }
 const TREE_ROW = 26
@@ -60,10 +69,15 @@ const KEYS = {
   expanded: 'assetLibrary.expanded',
   tree: 'assetLibrary.tree',
   treeWidth: 'assetLibrary.treeWidth',
-  tileSize: 'assetLibrary.tileSize'
+  tileSize: 'assetLibrary.tileSize',
+  recent: 'assetLibrary.recent',
+  scope: 'assetLibrary.searchScope'
 }
+/** Successes fade from the status line after this long; problems stay until the next action. */
+const STATUS_OK_MS = 6000
+const RECENT_MAX = 50
 
-type KindFilter = NonNullable<CatalogFilter['kind']> | 'favorites'
+type KindFilter = CatalogKind | 'all'
 type Tone = 'ok' | 'error' | 'info'
 
 interface PendingRequest {
@@ -89,9 +103,24 @@ interface State {
   /** Smallest tile width (the size slider). */
   tileSize: number
   text: string
+  /** Where a search looks: the open folder, or the whole library. */
+  searchScope: 'folder' | 'all'
   kind: KindFilter
+  favoritesOnly: boolean
   visible: CatalogAsset[]
+  /** The asset keyboard and actions work on; always one of `selectedIds` when set. */
   selectedId: string | null
+  selectedIds: Set<string>
+  /** Where a shift-click range starts. */
+  anchorId: string | null
+  /** IDs placed on the timeline, newest first. */
+  recent: string[]
+  /** Seq of the catalog delta applied on top of the full catalog (0: none). */
+  deltaSeq: number
+  /** The login setting as the editor just set it, until the engine confirms. */
+  loginEdit: boolean | null
+  /** The audio asset the engine is playing for the panel. */
+  playingId: string | null
   status: { text: string; tone: Tone } | null
   options: InsertOptions
   busy: boolean
@@ -135,9 +164,17 @@ const state: State = {
   treeWidth: readJson<number | null>(KEYS.treeWidth, null),
   tileSize: readJson<number>(KEYS.tileSize, TILE_SIZES.default),
   text: '',
+  searchScope: readJson<State['searchScope']>(KEYS.scope, 'folder'),
   kind: 'all',
+  favoritesOnly: false,
   visible: [],
   selectedId: null,
+  selectedIds: new Set(),
+  anchorId: null,
+  recent: readJson<string[]>(KEYS.recent, []),
+  deltaSeq: 0,
+  loginEdit: null,
+  playingId: null,
   status: null,
   options: loadOptions(),
   busy: false,
@@ -199,11 +236,23 @@ topbar.append(browseTab, settingsTab)
 // Search, with a favorites-only star.
 const header = el('div', 'header')
 const favoritesToggle = el('div', 'icon-button star-toggle', '★')
-favoritesToggle.title = 'Show only favorites'
+favoritesToggle.title = 'Show only Favorites'
 const search = el('input', 'search')
 search.placeholder = 'Search names, folders and tags'
 search.setAttribute('aria-label', 'Search assets')
-header.append(favoritesToggle, search)
+// Where a search looks; shown while a folder is open.
+const scopeSelect = el('select', 'scope-select')
+scopeSelect.setAttribute('aria-label', 'Search in')
+for (const [value, label] of [
+  ['folder', 'This folder'],
+  ['all', 'Everything']
+] as const) {
+  const option = el('option', '', label)
+  option.value = value
+  scopeSelect.append(option)
+}
+scopeSelect.value = state.searchScope
+header.append(favoritesToggle, search, scopeSelect)
 
 // Library: the folder tree (folders and files), a divider you can drag, and the grid.
 const body = el('div', 'body')
@@ -230,11 +279,33 @@ const importButton = el('div', 'button', 'Import')
 // A folder picker: a native menu, which Premiere's panel runtime reliably sends clicks to.
 const folderSelect = el('select', 'folder-select')
 folderSelect.setAttribute('aria-label', 'Folder')
-toolbar.append(treeToggle, upButton, folderSelect, importButton)
+const typeSelect = el('select', 'type-select')
+typeSelect.setAttribute('aria-label', 'Type')
+for (const [value, label] of [
+  ['all', 'All types'],
+  ['video', 'Video'],
+  ['audio', 'Audio'],
+  ['image', 'Images'],
+  ['template', 'Templates']
+] as const) {
+  const option = el('option', '', label)
+  option.value = value
+  typeSelect.append(option)
+}
+const sizeSlider = el('input', 'size-slider')
+sizeSlider.type = 'range'
+sizeSlider.min = String(TILE_SIZES.min)
+sizeSlider.max = String(TILE_SIZES.max)
+sizeSlider.step = '4'
+sizeSlider.value = String(state.tileSize)
+sizeSlider.title = 'Thumbnail size'
+sizeSlider.setAttribute('aria-label', 'Thumbnail size')
+toolbar.append(treeToggle, upButton, folderSelect, typeSelect, importButton, sizeSlider)
 const addFolderButton = el('div', 'button small', '+ Folder')
 addFolderButton.title = 'Add a folder to your library'
 treeHead.append(el('span', 'tree-title', 'Library'), addFolderButton)
 const grid = el('div', 'grid')
+grid.tabIndex = 0 // so the keyboard works after a click in the grid
 mainPane.append(toolbar, grid)
 body.append(treePane, splitter, mainPane)
 
@@ -246,22 +317,28 @@ const footer = el('div', 'footer')
 const tagRow = el('div', 'tag-row')
 const controls = el('div', 'controls')
 const bottomRow = el('div', 'bottom-row')
-const sizeSlider = el('input', 'size-slider')
-sizeSlider.type = 'range'
-sizeSlider.min = String(TILE_SIZES.min)
-sizeSlider.max = String(TILE_SIZES.max)
-sizeSlider.step = '4'
-sizeSlider.value = String(state.tileSize)
-sizeSlider.title = 'Thumbnail size'
-sizeSlider.setAttribute('aria-label', 'Thumbnail size')
+// Engine work in progress: a thin bar that fills as previews get made.
+const progressBar = el('div', 'progress')
+const progressFill = el('div', 'progress-fill')
+progressBar.append(progressFill)
 const statusLine = el('div', 'status')
-bottomRow.append(sizeSlider, statusLine)
+bottomRow.append(progressBar, statusLine)
 footer.append(tagRow, controls, bottomRow)
 
 app.append(topbar, header, body, settingsPane, footer)
 
+let statusTimer: ReturnType<typeof setTimeout> | undefined
+
 function setStatus(text: string, tone: Tone = 'info'): void {
   state.status = { text, tone }
+  clearTimeout(statusTimer)
+  if (tone === 'ok')
+    statusTimer = setTimeout(() => {
+      if (state.status?.text === text) {
+        state.status = null
+        renderFooter()
+      }
+    }, STATUS_OK_MS)
   renderFooter()
 }
 
@@ -277,6 +354,7 @@ function effective(asset: CatalogAsset): CatalogAsset {
 
 /** Drops edits the catalog now reflects. */
 function settleEdits(catalog: Catalog): void {
+  if (state.favoriteEdits.size === 0 && state.tagEdits.size === 0) return
   const byId = new Map(catalog.assets.map((asset) => [asset.id, asset]))
   for (const [id, favorite] of state.favoriteEdits) {
     const asset = byId.get(id)
@@ -292,11 +370,29 @@ function settleEdits(catalog: Catalog): void {
   }
 }
 
+let treeFor: { catalog: Catalog; tree: FolderNode[] } | null = null
+
+/** The folder tree of the current catalog, built once per catalog. */
+function folderTree(): FolderNode[] {
+  const catalog = state.catalog
+  if (!catalog) return []
+  if (treeFor?.catalog !== catalog) treeFor = { catalog, tree: buildFolderTree(catalog) }
+  return treeFor.tree
+}
+
 function scopeAssets(): CatalogAsset[] {
   const catalog = state.catalog
   if (!catalog) return []
   const all = catalog.assets.map(effective)
-  return state.view === 'folders' ? all.filter((a) => inFolder(a, catalog, state.folder)) : all
+  if (state.view !== 'folders') return all
+  if (state.folder === RECENT_KEY) {
+    const order = new Map(state.recent.map((id, index) => [id, index]))
+    return all
+      .filter((a) => order.has(a.id))
+      .sort((a, b) => (order.get(a.id) as number) - (order.get(b.id) as number))
+  }
+  if (state.text && state.searchScope === 'all') return all
+  return all.filter((a) => inFolder(a, catalog, state.folder))
 }
 
 /**
@@ -304,12 +400,20 @@ function scopeAssets(): CatalogAsset[] {
  * folder); background catalog updates keep the scroll position.
  */
 function applyFilter(resetScroll: boolean, rebuildTree = true): void {
-  state.visible = filterAssets(scopeAssets(), {
+  const scoped = scopeAssets()
+  state.visible = filterAssets(scoped, {
     text: state.text,
-    kind: state.kind === 'favorites' ? 'all' : state.kind,
-    favoritesOnly: state.kind === 'favorites'
+    kind: state.kind,
+    favoritesOnly: state.favoritesOnly
   })
-  if (state.selectedId && !state.visible.some((a) => a.id === state.selectedId)) {
+  if (state.folder === RECENT_KEY && state.view === 'folders') {
+    // Recent keeps its own order: what was placed last comes first.
+    const order = new Map(scoped.map((a, index) => [a.id, index]))
+    state.visible.sort((a, b) => (order.get(a.id) as number) - (order.get(b.id) as number))
+  }
+  const shown = new Set(state.visible.map((a) => a.id))
+  for (const id of state.selectedIds) if (!shown.has(id)) state.selectedIds.delete(id)
+  if (state.selectedId && !shown.has(state.selectedId)) {
     state.selectedId = null
     state.editingTag = false
   }
@@ -348,6 +452,31 @@ async function loadLatestCatalog(run: number, force: boolean): Promise<void> {
     renderAll()
     return
   }
+  // Small changes arrive as a delta file against the full catalog already loaded.
+  const live = engineRunning(state.engine) ? state.engine?.catalog : undefined
+  if (!force && live && state.catalog?.generation === live.generation) {
+    if (live.deltaSeq === state.deltaSeq) return
+    if (live.deltaSeq === 0) {
+      state.deltaSeq = 0 // the engine dropped its delta; the full catalog is current
+      return
+    }
+    let delta = null
+    try {
+      delta = parseCatalogDelta(await readText(joinPath(splitPath(path).dir, CATALOG_DELTA_FILE)))
+    } catch {
+      delta = null
+    }
+    if (stale(path)) return
+    if (delta && delta.generation === live.generation) {
+      if (delta.seq !== state.deltaSeq) {
+        state.catalog = applyCatalogDelta(state.catalog, delta)
+        state.deltaSeq = delta.seq
+        catalogLoaded(state.catalog)
+      }
+      return
+    }
+    // An unusable delta: read the whole catalog below.
+  }
   // The catalog can be many MB, so only read it when it has changed: the engine says when it
   // last wrote one, else the file's modified time, else every so often.
   const cue = engineRunning(state.engine) ? state.engine?.catalogUpdatedAt : undefined
@@ -376,13 +505,34 @@ async function loadLatestCatalog(run: number, force: boolean): Promise<void> {
   if (stale(path)) return
   // Remember the time even when nothing changed, so the next poll doesn't parse it again.
   state.catalogMtime = mtime
-  if (!force && state.catalog && catalog.updatedAt === state.catalog.updatedAt) return
+  if (
+    !force &&
+    state.catalog &&
+    catalog.updatedAt === state.catalog.updatedAt &&
+    catalog.generation === state.catalog.generation
+  )
+    return
   state.catalog = catalog
+  state.deltaSeq = 0
   state.error = null
   if (!state.expandedSaved)
     for (const root of catalog.roots) state.expanded.add(folderKey(root.id, ''))
+  catalogLoaded(catalog)
+}
+
+/** After a full or partial catalog arrives: settle edits, follow a new folder, show it. */
+function catalogLoaded(catalog: Catalog): void {
   settleEdits(catalog)
   selectAwaitedRoot(catalog)
+  // A folder remembered from last time that no longer exists would show an empty grid forever.
+  if (
+    catalog.roots.length > 0 &&
+    !state.folder.startsWith('*') &&
+    !findFolder(folderTree(), state.folder)
+  ) {
+    state.folder = ALL_KEY
+    save(KEYS.folder, state.folder)
+  }
   applyFilter(false)
 }
 
@@ -395,9 +545,15 @@ async function refreshCatalog(force = false): Promise<void> {
     await loadLatestCatalog(run, force)
   } catch (error) {
     if (run !== refreshGeneration) return
-    state.catalog = null
-    state.error = (error as Error).message
-    applyFilter(false)
+    // A read that fails while a catalog is already shown keeps it; the editor only loses the
+    // library when there was none to begin with.
+    if (state.catalog && state.catalog.updatedAt !== 0) {
+      setStatus(`Couldn't refresh the library: ${(error as Error).message}`, 'error')
+    } else {
+      state.catalog = null
+      state.error = (error as Error).message
+      applyFilter(false)
+    }
   } finally {
     refreshesInFlight--
   }
@@ -455,13 +611,22 @@ async function request(req: PanelRequest, label: string): Promise<string | null>
 function undoEdit(req: PanelRequest): void {
   if (req.type === 'set-favorite') state.favoriteEdits.delete(req.id)
   if (req.type === 'add-tag' || req.type === 'remove-tag') state.tagEdits.delete(req.id)
+  if (req.type === 'add-folder') state.awaitingRoot = null
+  if (req.type === 'set-settings') state.loginEdit = null
+  if (req.type === 'play-audio') state.playingId = null
 }
+
+let engineWasRunning = false
 
 async function pollEngine(): Promise<void> {
   if (!state.catalogPath) return
   const status = await readEngineStatus(state.catalogPath)
-  const changed = status?.updatedAt !== state.engine?.updatedAt
+  const running = engineRunning(status)
+  const changed = status?.updatedAt !== state.engine?.updatedAt || running !== engineWasRunning
+  engineWasRunning = running
   state.engine = status
+  if (state.loginEdit !== null && status?.settings.startAtLogin === state.loginEdit)
+    state.loginEdit = null
   // Outcomes of our requests.
   for (const result of status?.results ?? []) {
     const pending = state.pending.get(result.id)
@@ -471,12 +636,15 @@ async function pollEngine(): Promise<void> {
       undoEdit(pending.request)
       applyFilter(false)
     }
+    if (pending.request.type === 'play-audio' && !result.ok) state.playingId = null
+    if (pending.request.type === 'stop-audio') state.playingId = null
     setStatus(result.message, result.ok ? 'ok' : 'error')
   }
   // Requests nobody picked up.
   for (const [id, pending] of state.pending) {
-    if (Date.now() - pending.at < REQUEST_TIMEOUT_MS || engineRunning(status)) continue
+    if (Date.now() - pending.at < REQUEST_TIMEOUT_MS || running) continue
     state.pending.delete(id)
+    void removeRequest(state.catalogPath, id)
     undoEdit(pending.request)
     applyFilter(false)
     setStatus(
@@ -502,14 +670,55 @@ function toggleFavorite(asset: CatalogAsset): void {
   )
 }
 
+/** F on a selection: all become favorites, unless every one already is. */
+function toggleFavorites(assets: CatalogAsset[]): void {
+  if (assets.length <= 1) {
+    if (assets[0]) toggleFavorite(assets[0])
+    return
+  }
+  const favorite = !assets.every((asset) => effective(asset).favorite)
+  for (const asset of assets) {
+    if (effective(asset).favorite === favorite) continue
+    state.favoriteEdits.set(asset.id, favorite)
+    void request({ type: 'set-favorite', id: asset.id, favorite }, '')
+  }
+  applyFilter(false)
+  setStatus(
+    favorite
+      ? `Added ${assets.length} assets to Favorites.`
+      : `Removed ${assets.length} assets from Favorites.`,
+    'ok'
+  )
+}
+
 function addTag(asset: CatalogAsset, raw: string): void {
   const tag = raw.trim()
   if (!tag) return
   const current = effective(asset).tags
-  if (current.some((t) => t.toLowerCase() === tag.toLowerCase())) return
-  state.tagEdits.set(asset.id, [...current, tag])
+  const existing = current.find((t) => t.toLowerCase() === tag.toLowerCase())
+  if (existing) {
+    setStatus(`${asset.name} already has the tag “${existing}”.`)
+    return
+  }
+  // Reuse the library's spelling of a tag that already exists elsewhere.
+  const known = state.catalog?.tags.find((t) => t.toLowerCase() === tag.toLowerCase()) ?? tag
+  state.tagEdits.set(asset.id, [...current, known])
   applyFilter(false)
-  void request({ type: 'add-tag', id: asset.id, tag }, `Tagged ${asset.name} “${tag}”.`)
+  void request({ type: 'add-tag', id: asset.id, tag: known }, `Tagged ${asset.name} “${known}”.`)
+}
+
+/** Plays an audio asset through the engine (panels can't play sound); again to stop. */
+function audition(asset: CatalogAsset): void {
+  if (asset.kind !== 'audio') return
+  if (state.playingId === asset.id) {
+    state.playingId = null
+    renderGrid()
+    void request({ type: 'stop-audio' }, 'Stopped.')
+    return
+  }
+  state.playingId = asset.id
+  renderGrid()
+  void request({ type: 'play-audio', id: asset.id }, `Playing ${asset.name}…`)
 }
 
 function removeTag(asset: CatalogAsset, tag: string): void {
@@ -535,10 +744,7 @@ async function addFolder(): Promise<void> {
 
 /** Where an import goes: the selected library folder, or the engine's Imports folder. */
 function importTarget(): { rootId?: number; folder?: string; label: string } {
-  const node =
-    state.view === 'folders' && state.catalog
-      ? findFolder(buildFolderTree(state.catalog), state.folder)
-      : null
+  const node = state.view === 'folders' ? findFolder(folderTree(), state.folder) : null
   return node
     ? { rootId: node.rootId, folder: node.path, label: node.label }
     : { label: 'your Imports folder' }
@@ -588,11 +794,9 @@ function summary(asset: CatalogAsset): string {
   return parts.join(', ')
 }
 
-/** Everything a tile shows; when it changes (or the tile size does) the tile is rebuilt. */
-function tileKey(asset: CatalogAsset, box: Layout): string {
+/** Everything a tile shows; when it changes the tile is rebuilt (a size change only resizes it). */
+function tileKey(asset: CatalogAsset): string {
   return JSON.stringify([
-    box.tileWidth,
-    box.thumbHeight,
     asset.name,
     asset.kind,
     asset.path,
@@ -609,46 +813,76 @@ function tileKey(asset: CatalogAsset, box: Layout): string {
   ])
 }
 
-function buildTile(asset: CatalogAsset, box: Layout): HTMLElement {
+/** A tile's parts that depend on the thumbnail size, so a resize never rebuilds the tile. */
+interface TileNode {
+  node: HTMLElement
+  key: string
+  size: Layout
+  resize(box: Layout): void
+}
+
+function buildTile(asset: CatalogAsset, box: Layout): TileNode {
   const tile = el('div', 'tile')
-  tile.style.width = `${box.tileWidth}px`
   tile.title = `${asset.name}\n${asset.root}${asset.folder ? `/${asset.folder}` : ''}`
+  const size = { box }
 
   const thumb = el('div', `thumb${asset.hasAlpha ? ' alpha' : ''}`)
-  thumb.style.width = `${box.tileWidth}px`
-  thumb.style.height = `${box.thumbHeight}px`
+  const sized: HTMLElement[] = [tile, thumb]
   const stillPath = asset.kind === 'audio' ? asset.wave : asset.thumb
   if (stillPath) {
     const img = el('img', 'still')
-    img.style.width = `${box.tileWidth}px`
-    img.style.height = `${box.thumbHeight}px`
     showLocalImage(img, stillPath, mimeFor(stillPath))
     thumb.append(img)
+    sized.push(img)
   } else {
     thumb.append(el('div', 'placeholder', asset.name.split('.').pop()?.toUpperCase() ?? ''))
   }
 
   // Hover-scrub: slide the sprite strip so the frame under the cursor shows.
+  let sprite: HTMLElement | null = null
   if ((asset.kind === 'video' || asset.kind === 'template') && asset.sprite) {
-    const sprite = el('img', 'sprite')
-    sprite.style.width = `${box.tileWidth * SPRITE_FRAMES}px`
-    sprite.style.height = `${box.thumbHeight}px`
-    sprite.style.display = 'none'
+    const strip = el('img', 'sprite')
+    sprite = strip
+    strip.style.display = 'none'
     let loaded = false
     thumb.addEventListener('mousemove', (event) => {
       if (!loaded) {
-        showLocalImage(sprite, asset.sprite as string, mimeFor(asset.sprite as string))
+        showLocalImage(strip, asset.sprite as string, mimeFor(asset.sprite as string))
         loaded = true
       }
       // Measure from the thumb itself: offsetX is relative to whichever child is under the
       // cursor, which is the sprite once it shows.
+      const width = size.box.tileWidth
       const x = event.clientX - thumb.getBoundingClientRect().left
-      const ratio = Math.min(0.999, Math.max(0, x / box.tileWidth))
-      sprite.style.left = `${-Math.floor(ratio * SPRITE_FRAMES) * box.tileWidth}px`
-      sprite.style.display = 'block'
+      const ratio = Math.min(0.999, Math.max(0, x / width))
+      strip.style.left = `${-Math.floor(ratio * SPRITE_FRAMES) * width}px`
+      strip.style.display = 'block'
     })
-    thumb.addEventListener('mouseleave', () => (sprite.style.display = 'none'))
-    thumb.append(sprite)
+    thumb.addEventListener('mouseleave', () => (strip.style.display = 'none'))
+    thumb.append(strip)
+  }
+  const resize = (next: Layout): void => {
+    size.box = next
+    for (const node of sized) node.style.width = `${next.tileWidth}px`
+    thumb.style.height = `${next.thumbHeight}px`
+    if (sized[2]) sized[2].style.height = `${next.thumbHeight}px`
+    if (sprite) {
+      sprite.style.width = `${next.tileWidth * SPRITE_FRAMES}px`
+      sprite.style.height = `${next.thumbHeight}px`
+    }
+  }
+  resize(box)
+
+  // Audio plays through the engine: a play button on the tile (Space does the same).
+  if (asset.kind === 'audio') {
+    const play = el('span', 'play', state.playingId === asset.id ? '■' : '▶')
+    play.title = 'Play (Space)'
+    play.addEventListener('click', (event) => {
+      event.stopPropagation()
+      audition(asset)
+    })
+    play.addEventListener('dblclick', (event) => event.stopPropagation())
+    thumb.append(play)
   }
 
   const duration =
@@ -677,10 +911,10 @@ function buildTile(asset: CatalogAsset, box: Layout): HTMLElement {
 
   tile.append(thumb, el('div', 'name', asset.name), el('div', 'meta', summary(asset)))
 
-  tile.addEventListener('click', () => select(asset))
-  tile.addEventListener('dblclick', () => void place(asset))
+  tile.addEventListener('click', (event) => select(asset, event))
+  tile.addEventListener('dblclick', () => void placeSelection([asset]))
   makeDraggable(tile, asset)
-  return tile
+  return { node: tile, key: tileKey(asset), size: box, resize }
 }
 
 /** Drag onto Premiere's timeline (Premiere 27+ only). */
@@ -712,7 +946,7 @@ function scrollGridTo(id: string): void {
 
 /** Tiles currently in the DOM, by asset ID. Kept across renders so clicks, double-clicks and
  * loaded images survive scrolling, selection and catalog updates. */
-const tiles = new Map<string, { node: HTMLElement; key: string }>()
+const tiles = new Map<string, TileNode>()
 const spacer = el('div')
 spacer.style.position = 'relative'
 let shownMessage: string | null = null
@@ -744,11 +978,17 @@ function renderMessage(title: string, text: string, actions: Action[] = []): voi
   grid.append(box)
 }
 
+function typeLabel(kind: KindFilter): string {
+  return kind === 'image' ? 'images' : kind === 'all' ? 'assets' : `${kind}s`
+}
+
 function scopeName(): string {
   if (state.view === 'all' || state.folder === ALL_KEY) return 'your library'
+  if (state.text && state.searchScope === 'all') return 'your library'
   if (state.folder === FAVORITES_KEY) return 'Favorites'
+  if (state.folder === RECENT_KEY) return 'Recent'
   if (state.folder.startsWith(TAG_PREFIX)) return `“${state.folder.slice(TAG_PREFIX.length)}”`
-  const node = state.catalog ? findFolder(buildFolderTree(state.catalog), state.folder) : null
+  const node = findFolder(folderTree(), state.folder)
   return node?.label ?? 'this folder'
 }
 
@@ -784,16 +1024,25 @@ function renderEmpty(): void {
     )
     return
   }
-  if (state.kind === 'favorites') {
-    renderMessage(`No favorites in ${scopeName()}`, 'Click the ★ next to a file, or press F.', [
-      {
-        label: 'Show everything',
-        run: () => {
-          state.kind = 'all'
-          applyFilter(true)
+  if (state.folder === RECENT_KEY && state.view === 'folders') {
+    renderMessage('Nothing placed yet', 'Assets you add to the timeline show up here, newest first.')
+    return
+  }
+  if (state.favoritesOnly || state.kind !== 'all') {
+    renderMessage(
+      `No ${state.favoritesOnly ? 'favorites' : typeLabel(state.kind)} in ${scopeName()}`,
+      state.favoritesOnly ? 'Click the ★ next to a file, or press F.' : '',
+      [
+        {
+          label: 'Show everything',
+          run: () => {
+            state.kind = 'all'
+            state.favoritesOnly = false
+            applyFilter(true)
+          }
         }
-      }
-    ])
+      ]
+    )
     return
   }
   renderMessage(
@@ -842,17 +1091,21 @@ function renderGrid(remeasured = false): void {
     for (let column = 0; column < box.columns; column++) {
       const asset = state.visible[row * box.columns + column]
       if (!asset) break
-      const key = tileKey(asset, box)
+      const key = tileKey(asset) + (state.playingId === asset.id ? ':playing' : '')
       let entry = tiles.get(asset.id)
       if (!entry || entry.key !== key) {
         entry?.node.remove()
-        entry = { node: buildTile(asset, box), key }
+        entry = buildTile(asset, box)
+        entry.key = key
         tiles.set(asset.id, entry)
         spacer.append(entry.node)
+      } else if (entry.size !== box) {
+        entry.resize(box)
+        entry.size = box
       }
       shown.add(asset.id)
       const tile = entry.node
-      if (asset.id === state.selectedId) tile.classList.add('selected')
+      if (state.selectedIds.has(asset.id)) tile.classList.add('selected')
       else tile.classList.remove('selected')
       tile.style.left = `${GAP + column * (box.tileWidth + GAP)}px`
       tile.style.top = `${GAP + row * box.rowHeight}px`
@@ -903,11 +1156,8 @@ function openFolder(key: string, resetSearch: boolean): void {
   state.folder = key
   save(KEYS.folder, key)
   // Opening a folder reveals it in the tree.
-  if (state.catalog) {
-    for (const node of folderTrail(buildFolderTree(state.catalog), key).slice(0, -1))
-      state.expanded.add(node.key)
-    save(KEYS.expanded, [...state.expanded])
-  }
+  for (const node of folderTrail(folderTree(), key).slice(0, -1)) state.expanded.add(node.key)
+  save(KEYS.expanded, [...state.expanded])
   if (resetSearch && state.text) {
     state.text = ''
     search.value = ''
@@ -962,6 +1212,15 @@ function treeItems(): TreeItem[] {
       icon: '★',
       count: all.filter((a) => a.favorite).length,
       expandable: false
+    },
+    {
+      type: 'special',
+      key: RECENT_KEY,
+      depth: 0,
+      label: 'Recent',
+      icon: '↺',
+      count: state.recent.length,
+      expandable: false
     }
   ]
   // Files directly in each folder, by folder key.
@@ -998,7 +1257,7 @@ function treeItems(): TreeItem[] {
         asset
       })
   }
-  for (const root of buildFolderTree({ ...catalog, assets: all })) {
+  for (const root of folderTree()) {
     items.push({
       type: 'section',
       key: root.key,
@@ -1044,7 +1303,12 @@ function selectFromTree(asset: CatalogAsset): void {
       }
     }
   }
+  // Filters that would hide the file are lifted, so what was clicked is what shows.
+  if (state.favoritesOnly && !effective(asset).favorite) state.favoritesOnly = false
+  if (state.kind !== 'all' && asset.kind !== state.kind) state.kind = 'all'
   state.selectedId = asset.id
+  state.selectedIds = new Set([asset.id])
+  state.anchorId = asset.id
   state.editingTag = false
   state.status = null
   applyFilter(false, false)
@@ -1125,16 +1389,15 @@ function treeRowNode(item: TreeItem, index: number, width: number): HTMLElement 
   if (item.type === 'file' && item.asset) {
     const asset = item.asset
     row.addEventListener('mousedown', () => selectFromTree(asset))
-    row.addEventListener('dblclick', () => void place(asset))
+    row.addEventListener('dblclick', () => void placeSelection([asset]))
     makeDraggable(row, asset)
   } else if (item.key === TAGS_SECTION) {
     row.addEventListener('mousedown', () => toggleExpanded(item.key))
   } else {
     row.addEventListener('mousedown', () => {
-      // A click opens the folder; clicking the open folder again folds it.
-      if (item.expandable) {
-        if (!state.expanded.has(item.key)) state.expanded.add(item.key)
-        else if (state.folder === item.key) state.expanded.delete(item.key)
+      // A click opens the folder and shows what's inside; the caret folds it.
+      if (item.expandable && !state.expanded.has(item.key)) {
+        state.expanded.add(item.key)
         state.expandedSaved = true
         save(KEYS.expanded, [...state.expanded])
       }
@@ -1153,7 +1416,9 @@ let treeCache: TreeItem[] = []
 const treeRows = new Map<string, { node: HTMLElement; key: string }>()
 
 function isSelectedRow(item: TreeItem): boolean {
-  return item.type === 'file' ? item.asset?.id === state.selectedId : state.folder === item.key
+  return item.type === 'file'
+    ? state.selectedIds.has(item.asset?.id ?? '')
+    : state.folder === item.key
 }
 
 /** Everything a row shows; a change rebuilds it. Selection is toggled in place. */
@@ -1238,20 +1503,32 @@ splitter.addEventListener('mousedown', (event) => {
   dragStart = { x: event.clientX, width: treeWidth() }
   event.preventDefault()
 })
+let dragFrame = 0
 document.addEventListener('mousemove', (event) => {
   if (!dragStart) return
+  // The button went up outside the panel: the drag is over.
+  if (event.buttons === 0) {
+    endDrag()
+    return
+  }
   state.treeWidth = dragStart.width + event.clientX - dragStart.x
   setTreeWidth(treeWidth())
-  renderGrid()
+  if (dragFrame) return
+  dragFrame = requestAnimationFrame(() => {
+    dragFrame = 0
+    renderGrid()
+  })
 })
-document.addEventListener('mouseup', () => {
+function endDrag(): void {
   if (!dragStart) return
   dragStart = null
   state.treeWidth = treeWidth()
   save(KEYS.treeWidth, state.treeWidth)
   // Lay out again once the panes have their new sizes.
   requestAnimationFrame(() => renderAll())
-})
+}
+document.addEventListener('mouseup', endDrag)
+window.addEventListener('blur', endDrag)
 
 // ── Toolbar ─────────────────────────────────────────────────────────────────
 
@@ -1275,14 +1552,16 @@ function renderToolbar(): void {
   setDisabled(upButton, up === null)
   let label = 'All assets'
   if (state.folder === FAVORITES_KEY) label = 'Favorites'
+  else if (state.folder === RECENT_KEY) label = 'Recent'
   else if (state.folder.startsWith(TAG_PREFIX)) label = `# ${state.folder.slice(TAG_PREFIX.length)}`
-  else if (state.folder !== ALL_KEY && state.catalog) {
-    const trail = folderTrail(buildFolderTree(state.catalog), state.folder)
+  else if (state.folder !== ALL_KEY) {
+    const trail = folderTrail(folderTree(), state.folder)
     if (trail.length > 0) label = trail.map((node) => node.label).join(' › ')
   }
   crumbs.textContent = label
   crumbs.title = label
   renderFolderSelect(label)
+  if (typeSelect.value !== state.kind) typeSelect.value = state.kind
   importButton.title = `Copy files into ${importTarget().label} and add them to the library`
 }
 
@@ -1291,7 +1570,7 @@ let folderOptionsFor = ''
 /** Fills the folder menu (all folders, indented, plus Favorites and tags). */
 function renderFolderSelect(label: string): void {
   const catalog = state.catalog
-  const signature = `${catalog?.updatedAt ?? 0}:${state.favoriteEdits.size}:${state.tagEdits.size}`
+  const signature = `${catalog?.updatedAt ?? 0}:${state.favoriteEdits.size}:${state.tagEdits.size}:${state.recent.length}`
   if (catalog && signature !== folderOptionsFor) {
     folderOptionsFor = signature
     folderSelect.textContent = ''
@@ -1303,11 +1582,12 @@ function renderFolderSelect(label: string): void {
     const all = catalog.assets.map(effective)
     add(ALL_KEY, `All assets (${all.length.toLocaleString()})`)
     add(FAVORITES_KEY, `★ Favorites (${all.filter((a) => a.favorite).length.toLocaleString()})`)
+    add(RECENT_KEY, `↺ Recent (${state.recent.length})`)
     const walk = (node: FolderNode): void => {
       add(node.key, `${'\u2003'.repeat(node.depth)}${node.label} (${node.count.toLocaleString()})`)
       for (const child of node.children) walk(child)
     }
-    for (const root of buildFolderTree({ ...catalog, assets: all })) walk(root)
+    for (const root of folderTree()) walk(root)
     const tags = [...new Set(all.flatMap((a) => a.tags))].sort((a, b) => a.localeCompare(b))
     for (const tag of tags) add(tagKey(tag), `# ${tag}`)
   }
@@ -1331,6 +1611,19 @@ upButton.addEventListener('click', () => {
 })
 importButton.addEventListener('click', () => void importFiles())
 addFolderButton.addEventListener('click', () => void addFolder())
+typeSelect.addEventListener('change', () => {
+  const value = typeSelect.value
+  state.kind =
+    value === 'video' || value === 'audio' || value === 'image' || value === 'template'
+      ? value
+      : 'all'
+  applyFilter(true)
+})
+scopeSelect.addEventListener('change', () => {
+  state.searchScope = scopeSelect.value === 'all' ? 'all' : 'folder'
+  save(KEYS.scope, state.searchScope)
+  if (state.text) applyFilter(true)
+})
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
@@ -1355,135 +1648,200 @@ function chooseCatalogFile(): Promise<void> {
     .catch((error: Error) => setStatus(`Couldn't open that file: ${error.message}`, 'error'))
 }
 
+/** What the Settings tab is built from; a change rebuilds it, otherwise only texts update. */
+let settingsKey = ''
+const settingsTexts = new Map<string, HTMLElement>()
+
+function loginOn(): boolean {
+  return state.loginEdit ?? state.engine?.settings.startAtLogin !== false
+}
+
+function checkRow(label: string, on: boolean, toggle: () => void): HTMLElement {
+  const row = el('div', 'check-row')
+  const box = el('span', `checkbox${on ? ' on' : ''}`, on ? '✓' : '')
+  row.append(box, el('span', '', label))
+  row.addEventListener('click', toggle)
+  return row
+}
+
+function engineWords(): string {
+  const engine = state.engine
+  if (!engineRunning(engine)) return "Not running. Thumbnails, imports and edits wait until it's started."
+  if ((engine?.indexing.rootIds.length ?? 0) > 0)
+    return `Indexing ${(engine?.indexing.filesSeen ?? 0).toLocaleString()} files…`
+  if (engine && engine.pendingMedia > 0)
+    return `Making previews (${engine.pendingMedia.toLocaleString()} to go)`
+  return 'Running · Up to date'
+}
+
+/**
+ * Settings are rebuilt only when their shape changes (folders, engine up or down, a confirm);
+ * every heartbeat just updates the numbers, so a button under the mouse is never replaced.
+ */
 function renderSettings(): void {
-  settingsPane.textContent = ''
   const engine = state.engine
   const running = engineRunning(engine)
-
-  const engineBox = section('Engine')
-  const line = el('div', 'settings-line')
-  const dot = el('span', `dot${running ? ' on' : ''}`)
-  const indexingCount = engine?.indexing.rootIds.length ?? 0
-  const words = !running
-    ? "Not running. Thumbnails, imports and edits wait until it's started."
-    : indexingCount > 0
-      ? `Indexing ${(engine?.indexing.filesSeen ?? 0).toLocaleString()} files…`
-      : engine && engine.pendingMedia > 0
-        ? `Making previews (${engine.pendingMedia.toLocaleString()} to go)`
-        : 'Running · Up to date'
-  line.append(dot, el('span', 'settings-text', words))
-  engineBox.append(line)
-  if (!running)
-    engineBox.append(
-      button('Start engine', 'primary', () => {
-        engineStartAt = 0
-        void ensureEngine()
-        setStatus('Starting the Asset Library engine…')
-      })
-    )
-
-  const folders = section('Library folders')
   const roots = state.catalog?.roots ?? []
-  const counts = new Map<number, number>()
-  if (state.catalog)
-    for (const node of buildFolderTree(state.catalog)) counts.set(node.rootId, node.count)
-  if (roots.length === 0) folders.append(el('div', 'settings-hint', 'No folders yet.'))
-  for (const root of roots) {
-    const row = el('div', 'folder-row')
-    const text = el('div', 'folder-text')
-    text.append(
-      el('div', 'folder-name', root.label),
-      el(
-        'div',
-        'folder-meta',
-        root.online
-          ? `${(counts.get(root.id) ?? 0).toLocaleString()} assets${root.path ? ` · ${root.path}` : ''}`
-          : `Not connected${root.path ? ` · ${root.path}` : ''}`
+  const updatesOn = engine?.settings.checkForUpdates !== false
+  const key = JSON.stringify([
+    running,
+    roots.map((root) => [root.id, root.label, root.online, root.path]),
+    state.confirmRemove,
+    state.catalogPath,
+    engine?.importsFolder,
+    loginOn(),
+    updatesOn,
+    engine?.update?.version
+  ])
+  if (key !== settingsKey) {
+    settingsKey = key
+    settingsPane.textContent = ''
+    settingsTexts.clear()
+
+    const engineBox = section('Engine')
+    const line = el('div', 'settings-line')
+    const words = el('span', 'settings-text')
+    settingsTexts.set('engine', words)
+    line.append(el('span', `dot${running ? ' on' : ''}`), words)
+    engineBox.append(line)
+    if (!running)
+      engineBox.append(
+        button('Start engine', 'primary', () => {
+          engineStartAt = 0
+          void ensureEngine()
+          setStatus('Starting the Asset Library engine…')
+        })
       )
-    )
-    const confirming = state.confirmRemove === root.id
-    row.append(
-      text,
-      button(
-        'Rescan',
-        'small',
-        () => void request({ type: 'rescan', rootId: root.id }, `Rescanning ${root.label}…`)
-      ),
-      button(confirming ? 'Confirm' : 'Remove', confirming ? 'small danger' : 'small', () => {
-        if (!confirming) {
-          state.confirmRemove = root.id
-          renderSettings()
-          setTimeout(() => {
-            if (state.confirmRemove === root.id) {
-              state.confirmRemove = null
-              renderSettings()
-            }
-          }, 4000)
-          return
-        }
-        state.confirmRemove = null
+    if (engine?.update) {
+      const update = engine.update
+      const row = el('div', 'settings-line')
+      row.append(
+        el('span', 'settings-text', `Version ${update.version} is available.`),
+        button('Get it', 'small', () => void openLink(update.url))
+      )
+      engineBox.append(row)
+    }
+
+    const general = section('General')
+    general.append(
+      checkRow('Start the engine when I log in', loginOn(), () => {
+        const next = !loginOn()
+        state.loginEdit = next
+        renderSettings()
         void request(
-          { type: 'remove-folder', rootId: root.id },
-          `Removing ${root.label} from the library. Your files stay where they are.`
+          { type: 'set-settings', startAtLogin: next },
+          next ? 'The engine will start when you log in.' : "The engine won't start at login."
+        )
+      }),
+      checkRow('Check for new versions once a day', updatesOn, () => {
+        void request(
+          { type: 'set-settings', checkForUpdates: !updatesOn },
+          updatesOn ? 'Update checks are off.' : 'Asset Library will check for new versions daily.'
         )
       })
     )
-    folders.append(row)
+
+    const folders = section('Library folders')
+    if (roots.length === 0) folders.append(el('div', 'settings-hint', 'No folders yet.'))
+    for (const root of roots) {
+      const row = el('div', 'folder-row')
+      const text = el('div', 'folder-text')
+      const meta = el('div', 'folder-meta')
+      settingsTexts.set(`root:${root.id}`, meta)
+      text.append(el('div', 'folder-name', root.label), meta)
+      const confirming = state.confirmRemove === root.id
+      row.append(
+        text,
+        button(
+          'Rescan',
+          'small',
+          () => void request({ type: 'rescan', rootId: root.id }, `Rescanning ${root.label}…`)
+        ),
+        button(confirming ? 'Confirm' : 'Remove', confirming ? 'small danger' : 'small', () => {
+          if (!confirming) {
+            state.confirmRemove = root.id
+            renderSettings()
+            setTimeout(() => {
+              if (state.confirmRemove === root.id) {
+                state.confirmRemove = null
+                renderSettings()
+              }
+            }, 4000)
+            return
+          }
+          state.confirmRemove = null
+          void request(
+            { type: 'remove-folder', rootId: root.id },
+            `Removing ${root.label} from the library. Your files stay where they are.`
+          )
+        })
+      )
+      folders.append(row)
+    }
+    const folderActions = el('div', 'settings-actions')
+    folderActions.append(
+      button('Add folder', 'primary', () => void addFolder()),
+      button('Rescan all', '', () => void request({ type: 'rescan' }, 'Rescanning all folders…'))
+    )
+    folders.append(folderActions)
+    if (engine?.importsFolder)
+      folders.append(
+        el('div', 'settings-hint', `Imports without a folder go to ${engine.importsFolder}`)
+      )
+
+    const previews = section('Previews')
+    const cache = el('div', 'settings-line')
+    const cacheText = el('span', 'settings-text')
+    settingsTexts.set('cache', cacheText)
+    cache.append(
+      cacheText,
+      button(
+        'Clear',
+        'small',
+        () =>
+          void request({ type: 'clear-cache' }, 'Clearing previews. They rebuild in the background.')
+      )
+    )
+    previews.append(cache)
+
+    const advanced = section('Advanced')
+    const catalogLine = el('div', 'settings-line')
+    catalogLine.append(
+      el('span', 'settings-text muted', state.catalogPath ?? 'Catalog not found'),
+      button('Change…', 'small', () => void chooseCatalogFile())
+    )
+    advanced.append(catalogLine)
+
+    const about = section('About')
+    const aboutText = el('div', 'settings-hint')
+    settingsTexts.set('about', aboutText)
+    about.append(aboutText)
   }
-  const folderActions = el('div', 'settings-actions')
-  folderActions.append(
-    button('Add folder', 'primary', () => void addFolder()),
-    button('Rescan all', '', () => void request({ type: 'rescan' }, 'Rescanning all folders…'))
-  )
-  folders.append(folderActions)
-  if (engine?.importsFolder)
-    folders.append(
-      el('div', 'settings-hint', `Imports without a folder go to ${engine.importsFolder}`)
-    )
 
-  const general = section('General')
-  const login = el('div', 'check-row')
-  const box = el('span', `checkbox${engine?.settings.startAtLogin !== false ? ' on' : ''}`)
-  box.textContent = engine?.settings.startAtLogin !== false ? '✓' : ''
-  login.append(box, el('span', '', 'Start the engine when I log in'))
-  login.addEventListener('click', () => {
-    const next = !(engine?.settings.startAtLogin !== false)
-    void request(
-      { type: 'set-settings', startAtLogin: next },
-      next ? 'The engine will start when you log in.' : "The engine won't start at login."
-    )
-  })
-  general.append(login)
-  const cache = el('div', 'settings-line')
-  cache.append(
-    el(
-      'span',
-      'settings-text',
-      `Thumbnails and previews: ${engine ? formatBytes(engine.cacheBytes) : '—'}`
-    ),
-    button(
-      'Clear',
-      'small',
-      () =>
-        void request({ type: 'clear-cache' }, 'Clearing previews. They rebuild in the background.')
-    )
-  )
-  general.append(cache)
-  const catalogLine = el('div', 'settings-line')
-  catalogLine.append(
-    el('span', 'settings-text muted', state.catalogPath ?? 'Catalog not found'),
-    button('Change…', 'small', () => void chooseCatalogFile())
-  )
-  general.append(catalogLine)
+  // The numbers that change with every heartbeat.
+  settingsTexts.get('engine')!.textContent = engineWords()
+  const counts = new Map<number, number>()
+  for (const node of folderTree()) counts.set(node.rootId, node.count)
+  for (const root of roots) {
+    const meta = settingsTexts.get(`root:${root.id}`)
+    if (meta)
+      meta.textContent = root.online
+        ? `${(counts.get(root.id) ?? 0).toLocaleString()} assets${root.path ? ` · ${root.path}` : ''}`
+        : `Not connected${root.path ? ` · ${root.path}` : ''}`
+  }
+  settingsTexts.get('cache')!.textContent =
+    `Thumbnails and previews: ${engine ? formatBytes(engine.cacheBytes) : '—'}`
+  settingsTexts.get('about')!.textContent =
+    `Asset Library panel ${PANEL_VERSION}${engine ? ` · engine ${engine.version}` : ''} · by Saxenas Creation`
+}
 
-  const about = section('About')
-  about.append(
-    el(
-      'div',
-      'settings-hint',
-      `Asset Library panel ${PANEL_VERSION}${engine ? ` · engine ${engine.version}` : ''} · by Saxenas Creation`
-    )
-  )
+/** Opens a web page in the browser (only our own release pages are ever linked). */
+async function openLink(url: string): Promise<void> {
+  try {
+    await uxp.shell?.openExternal(url, 'Open the release page')
+  } catch (error) {
+    setStatus(`Couldn't open the page: ${(error as Error).message}`, 'error')
+  }
 }
 
 // ── Selection and placing on the timeline ───────────────────────────────────
@@ -1492,21 +1850,58 @@ function selected(): CatalogAsset | null {
   return state.visible.find((asset) => asset.id === state.selectedId) ?? null
 }
 
-function select(asset: CatalogAsset): void {
+/** Every selected asset, in the grid's order. */
+function selectedAssets(): CatalogAsset[] {
+  return state.visible.filter((asset) => state.selectedIds.has(asset.id))
+}
+
+/** A click on a tile: plain selects it, shift extends to it, ctrl/cmd adds or removes it. */
+function select(asset: CatalogAsset, event?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): void {
   if (state.selectedId !== asset.id) state.editingTag = false
+  const order = state.visible.map((a) => a.id)
+  if (event?.shiftKey) {
+    state.selectedIds = new Set(rangeBetween(order, state.anchorId, asset.id))
+  } else if (event?.metaKey || event?.ctrlKey) {
+    if (state.selectedIds.has(asset.id) && state.selectedIds.size > 1)
+      state.selectedIds.delete(asset.id)
+    else state.selectedIds.add(asset.id)
+    state.anchorId = asset.id
+  } else {
+    state.selectedIds = new Set([asset.id])
+    state.anchorId = asset.id
+  }
   state.selectedId = asset.id
   state.status = null
+  grid.focus()
   renderGrid()
   renderTree(false)
   renderFooter()
 }
 
-async function place(asset: CatalogAsset): Promise<void> {
-  if (state.busy) return
+/** Moves the selection in the grid by `step` tiles (a row is `columns` tiles). */
+function moveSelection(step: number, extend: boolean): void {
+  if (state.visible.length === 0) return
+  const index = state.visible.findIndex((asset) => asset.id === state.selectedId)
+  const next = index === -1 ? 0 : Math.min(state.visible.length - 1, Math.max(0, index + step))
+  const asset = state.visible[next]
+  if (!asset) return
+  select(asset, extend ? { shiftKey: true, metaKey: false, ctrlKey: false } : undefined)
+  scrollGridTo(asset.id)
+}
+
+/** Puts the assets on the timeline one after another, starting at the playhead. */
+async function placeSelection(assets: CatalogAsset[]): Promise<void> {
+  if (state.busy || assets.length === 0) return
   state.busy = true
-  setStatus(`Adding ${asset.name}…`)
+  const first = assets[0] as CatalogAsset
+  setStatus(assets.length === 1 ? `Adding ${first.name}…` : `Adding ${assets.length} assets…`)
   try {
-    setStatus(await insertAtPlayhead(asset, state.options), 'ok')
+    const message = await placeAtPlayhead(assets, state.options)
+    for (const asset of assets) state.recent = recordRecent(state.recent, asset.id, RECENT_MAX)
+    save(KEYS.recent, state.recent)
+    setStatus(message, 'ok')
+    if (state.folder === RECENT_KEY) applyFilter(false)
+    else renderTree(false)
   } catch (error) {
     setStatus(
       error instanceof UserError
@@ -1571,8 +1966,7 @@ function buildControls(): void {
     saveOptions()
   })
   placeButton.addEventListener('click', () => {
-    const asset = selected()
-    if (asset && !placeButton.classList.contains('disabled')) void place(asset)
+    if (!placeButton.classList.contains('disabled')) void placeSelection(selectedAssets())
   })
   choiceRow.append(modeSelect)
   actionRow.append(placeButton)
@@ -1627,28 +2021,47 @@ function renderTagRow(asset: CatalogAsset | null): void {
   }
 }
 
+/** The most previews waiting since the engine started on them, so progress can be shown. */
+let mediaTotal = 0
+
 function renderFooter(): void {
   const asset = state.tab === 'library' ? selected() : null
-  renderTagRow(asset)
+  const count = state.tab === 'library' ? state.selectedIds.size : 0
+  renderTagRow(count === 1 ? asset : null)
   show(controls, state.tab === 'library')
-  show(sizeSlider, state.tab === 'library')
-  setDisabled(placeButton, !asset || state.busy)
+  setDisabled(placeButton, count === 0 || state.busy)
+  placeButton.textContent = count > 1 ? `Add ${count} at playhead` : 'Add at playhead'
 
-  const indexing = (state.engine?.indexing.rootIds.length ?? 0) > 0
+  const engine = state.engine
+  const indexing = (engine?.indexing.rootIds.length ?? 0) > 0
+  const pending = engine?.pendingMedia ?? 0
+  mediaTotal = pending === 0 ? 0 : Math.max(mediaTotal, pending)
+  let working = ''
+  if (indexing) working = `Indexing… ${(engine?.indexing.filesSeen ?? 0).toLocaleString()} files found`
+  else if (pending > 0) working = `Making previews · ${pending.toLocaleString()} to go`
+  show(progressBar, state.tab === 'library' && pending > 0 && !state.status)
+  progressFill.style.width = `${mediaTotal > 0 ? Math.round(((mediaTotal - pending) / mediaTotal) * 100) : 0}%`
+
   const hint = state.status
     ? state.status
     : {
-        text: asset
-          ? canDrag
-            ? 'Double-click or drag onto the timeline. F adds to Favorites.'
-            : 'Double-click to add at the playhead. F adds to Favorites.'
-          : state.catalog
-            ? `${state.visible.length.toLocaleString()} assets${indexing ? ' · Indexing…' : ''}`
-            : '',
+        text:
+          count > 1
+            ? `${count} selected · Enter adds them in order, F favorites them`
+            : asset
+              ? canDrag
+                ? 'Double-click or drag onto the timeline. F adds to Favorites.'
+                : 'Double-click to add at the playhead. F adds to Favorites.'
+              : working
+                ? working
+                : state.catalog
+                  ? `${state.visible.length.toLocaleString()} assets`
+                  : '',
         tone: 'info' as const
       }
   statusLine.className = `status${hint.tone === 'info' ? '' : ` ${hint.tone}`}`
   statusLine.textContent = hint.text
+  statusLine.title = hint.text
 }
 
 // ── Header ──────────────────────────────────────────────────────────────────
@@ -1658,8 +2071,9 @@ function renderHeader(): void {
   else browseTab.classList.remove('active')
   if (state.tab === 'settings') settingsTab.classList.add('active')
   else settingsTab.classList.remove('active')
-  if (state.kind === 'favorites') favoritesToggle.classList.add('on')
+  if (state.favoritesOnly) favoritesToggle.classList.add('on')
   else favoritesToggle.classList.remove('on')
+  show(scopeSelect, state.view === 'folders' && state.folder !== ALL_KEY)
 }
 
 browseTab.addEventListener('click', () => {
@@ -1671,7 +2085,7 @@ settingsTab.addEventListener('click', () => {
   renderAll()
 })
 favoritesToggle.addEventListener('click', () => {
-  state.kind = state.kind === 'favorites' ? 'all' : 'favorites'
+  state.favoritesOnly = !state.favoritesOnly
   applyFilter(true)
 })
 sizeSlider.addEventListener('input', () => {
@@ -1709,16 +2123,65 @@ search.addEventListener('input', () => {
 
 const TYPING_TAGS = ['input', 'select', 'textarea', 'button']
 
+function clearSearch(): void {
+  if (!state.text && !search.value) return
+  state.text = ''
+  search.value = ''
+  applyFilter(true)
+}
+
+// Keyboard: arrows move the selection (shift extends), Enter adds, F favorites, Space plays a
+// sound, Esc clears, / finds.
 document.addEventListener('keydown', (event) => {
   if (event.repeat) return
+  if (event.key === 'Escape' && document.activeElement === search) {
+    clearSearch()
+    grid.focus()
+    return
+  }
   // Keys in a field, menu or button belong to that control.
   const target = event.target as HTMLElement | null
   if (target?.tagName && TYPING_TAGS.includes(target.tagName.toLowerCase())) return
   if (document.activeElement === search || state.tab !== 'library') return
-  const asset = selected()
-  if (!asset) return
-  if (event.key === 'Enter') void place(asset)
-  else if (event.key === 'f' || event.key === 'F') toggleFavorite(asset)
+  if (event.key === '/') {
+    event.preventDefault()
+    search.focus()
+    return
+  }
+  if (event.key === 'Escape') {
+    if (state.text) clearSearch()
+    else if (state.selectedIds.size > 0) {
+      state.selectedIds = new Set()
+      state.selectedId = null
+      state.editingTag = false
+      renderAll(false)
+    }
+    return
+  }
+  const columns = state.visible.length > 0 ? layout().columns : 1
+  const moves: Record<string, number> = {
+    ArrowRight: 1,
+    ArrowLeft: -1,
+    ArrowDown: columns,
+    ArrowUp: -columns
+  }
+  const step = moves[event.key]
+  if (step !== undefined) {
+    event.preventDefault()
+    moveSelection(step, event.shiftKey)
+    return
+  }
+  const assets = selectedAssets()
+  if (assets.length === 0) return
+  if (event.key === 'Enter') void placeSelection(assets)
+  else if (event.key === 'f' || event.key === 'F') toggleFavorites(assets)
+  else if (event.key === ' ') {
+    const asset = selected()
+    if (asset?.kind === 'audio') {
+      event.preventDefault()
+      audition(asset)
+    }
+  }
 })
 
 let resizeFrame = 0

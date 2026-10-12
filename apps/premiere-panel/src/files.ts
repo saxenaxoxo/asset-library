@@ -156,6 +156,22 @@ export async function writeText(path: string, text: string): Promise<void> {
   await file.write(text, { format: uxp.storage.formats.utf8 })
 }
 
+/** Deletes a file the panel wrote. Quiet when it's already gone. */
+export async function deleteFile(path: string): Promise<void> {
+  try {
+    await fs.unlink(path)
+    return
+  } catch {
+    // try the entry API
+  }
+  try {
+    const entry = await lfs.getEntryWithUrl(fileUrl(path))
+    await entry.delete()
+  } catch {
+    // already gone, or not ours to delete
+  }
+}
+
 /** Lets the editor pick a folder. Returns its path, or null if they cancelled. */
 export async function pickFolder(): Promise<string | null> {
   const folder = await lfs.getFolder()

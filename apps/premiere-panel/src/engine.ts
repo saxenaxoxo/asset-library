@@ -10,7 +10,15 @@ import {
   type EngineStatus,
   type PanelRequest
 } from '@catalog/requests'
-import { ensureFolder, joinPath, modifiedTime, readText, splitPath, writeText } from './files'
+import {
+  deleteFile,
+  ensureFolder,
+  joinPath,
+  modifiedTime,
+  readText,
+  splitPath,
+  writeText
+} from './files'
 
 const uxp = require('uxp')
 
@@ -21,6 +29,11 @@ export async function sendRequest(catalogPath: string, request: PanelRequest): P
   const id = requestId(Date.now(), Math.random())
   await writeText(joinPath(dir, `${id}.json`), JSON.stringify(request))
   return id
+}
+
+/** Takes back a request the engine never picked up, so it isn't acted on later. */
+export async function removeRequest(catalogPath: string, id: string): Promise<void> {
+  await deleteFile(joinPath(joinPath(splitPath(catalogPath).dir, REQUESTS_FOLDER), `${id}.json`))
 }
 
 let lastStatusMtime: number | null = null
