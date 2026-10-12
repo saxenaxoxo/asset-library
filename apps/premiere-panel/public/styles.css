@@ -206,18 +206,10 @@ body {
   flex-shrink: 0;
 }
 
-.preview.playable {
-  cursor: pointer;
-}
-
-.preview img.cover {
+.preview img.strip {
   position: absolute;
   left: 0;
   top: 0;
-}
-
-.badge.play {
-  color: var(--ink);
 }
 
 .selection-text {
@@ -225,14 +217,36 @@ body {
   overflow: hidden;
 }
 
-.controls {
+.control-row {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+/* Video track, audio track and edit type: equal columns on one line. */
+.control-row.choices select {
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0;
+  min-width: 0;
+  margin: 0 6px 0 0;
+}
+
+.control-row.choices select:last-child,
+.control-row.actions .button:last-child {
+  margin-right: 0;
+}
+
+.control-row.actions .button {
+  margin: 0 6px 0 0;
+}
+
+.control-row.actions .button.primary {
+  flex-grow: 1;
 }
 
 .controls select {
-  margin: 0 6px 4px 0;
   padding: 3px 4px;
   font-size: 11px;
   background: var(--canvas);

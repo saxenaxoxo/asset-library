@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Tested in Premiere Pro 26 and After Effects 26 (macOS)
+
+- Send to After Effects works: it failed in the real app with error -1708 because After Effects' "DoScriptFile" command can't be named when the app is chosen at run time; it now uses the command's raw code.
+- Premiere panel previews: Premiere's panel runtime can't play video (`play()` fails inside the host) and draws video over the panel, hiding audio waveforms. The selected video now plays as a flipbook of its scrub frames, and audio shows its waveform.
+- Premiere panel layout: video track, audio track and edit type sit on one line in equal columns, with "Add at playhead" and "Import" below.
+- Confirmed working in the hosts: panel install with Adobe's installer, thumbnails and waveforms, hover-scrub, search, overwrite and insert at the current playhead on chosen tracks, one-step undo, no duplicate imports, `#` and `%` in file names, transparency, drag from the app into Premiere's timeline and After Effects' project, and Send to After Effects with one-step undo.
+
 ### Windows
 
 - Every build now installs the Windows app with the real installer, tests the installed app, and uninstalls it again.

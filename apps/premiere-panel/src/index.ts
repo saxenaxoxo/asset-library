@@ -13,7 +13,7 @@ import {
 } from './files'
 import { storage } from './host'
 import { insertAtPlayhead, importOnly, UserError, type InsertOptions } from './premiere'
-import { dragContentType, DRAG_MIN_MAJOR, fileUri, fileUrl, hostMajor } from './paths'
+import { dragContentType, DRAG_MIN_MAJOR, fileUri, hostMajor } from './paths'
 
 const uxp = require('uxp')
 const canDrag = hostMajor(uxp.host.version) >= DRAG_MIN_MAJOR
@@ -504,81 +504,46 @@ function saveOptions(): void {
 }
 
 // The footer is built once; renders only update it, so open menus stay open and the preview
-// keeps playing. The selection row is rebuilt only when the selected asset changes.
+// keeps running. The selection row is rebuilt only when the selected asset changes.
 const selectionRow = el('div', 'selection')
 const controls = el('div', 'controls')
 const statusLine = el('div', 'status')
 footer.append(selectionRow, controls, statusLine)
 let shownSelection: string | null = null
 
+const PREVIEW_WIDTH = 96
+const PREVIEW_HEIGHT = 54
+
 function previewImage(path: string): HTMLImageElement {
   const img = el('img')
-  img.style.width = '96px'
-  img.style.height = '54px'
+  img.style.width = `${PREVIEW_WIDTH}px`
+  img.style.height = `${PREVIEW_HEIGHT}px`
   showLocalImage(img, path, mimeFor(path))
   return img
 }
 
-function videoPreview(asset: CatalogAsset, src: string, preview: HTMLElement): void {
-  const video = el('video')
-  video.setAttribute('src', fileUrl(src))
-  video.setAttribute('autoplay', '')
-  video.setAttribute('loop', '')
-  video.setAttribute('muted', '')
-  video.muted = true
-  video.style.width = '96px'
-  video.style.height = '54px'
-  video.addEventListener('error', () => {
-    preview.textContent = ''
-    if (asset.thumb) preview.append(previewImage(asset.thumb))
-  })
-  preview.append(video)
+// Premiere's UXP shows a <video>'s first frame but can't play it (play() throws inside the host),
+// and the video layer draws over everything around it. So previews are images: a video flips
+// through its hover-scrub frames, audio shows its waveform.
+const FLIP_MS = 300
+let flipTimer: ReturnType<typeof setInterval> | null = null
+
+function stopFlipbook(): void {
+  if (flipTimer) clearInterval(flipTimer)
+  flipTimer = null
 }
 
-/** Audio never starts on its own: the waveform shows, and a click plays or pauses it. */
-function audioPreview(asset: CatalogAsset, src: string, preview: HTMLElement): void {
-  const audio = el('video')
-  audio.setAttribute('src', fileUrl(src))
-  audio.setAttribute('preload', 'metadata')
-  audio.style.width = '96px'
-  audio.style.height = '54px'
-  preview.append(audio)
-  if (asset.wave) {
-    const wave = previewImage(asset.wave)
-    wave.className = 'cover'
-    preview.append(wave)
-  }
-  const toggle = el('span', 'badge play', '▶')
-  toggle.style.left = '4px'
-  toggle.style.bottom = '4px'
-  preview.append(toggle)
-  preview.title = 'Click to play or pause'
-  preview.classList.add('playable')
-  let playing = false
-  const show = (now: boolean): void => {
-    playing = now
-    toggle.textContent = now ? '❚❚' : '▶'
-  }
-  audio.addEventListener('play', () => show(true))
-  audio.addEventListener('pause', () => show(false))
-  audio.addEventListener('ended', () => show(false))
-  audio.addEventListener('error', () => {
-    toggle.remove()
-    preview.classList.remove('playable')
-    preview.title = ''
-  })
-  preview.addEventListener('click', () => {
-    try {
-      if (playing) {
-        audio.pause()
-      } else {
-        audio.muted = false
-        void Promise.resolve(audio.play()).catch(() => show(false))
-      }
-    } catch {
-      show(false)
-    }
-  })
+function flipbookPreview(spritePath: string, preview: HTMLElement): void {
+  const strip = el('img', 'strip')
+  strip.style.width = `${PREVIEW_WIDTH * SPRITE_FRAMES}px`
+  strip.style.height = `${PREVIEW_HEIGHT}px`
+  showLocalImage(strip, spritePath, mimeFor(spritePath))
+  preview.append(strip)
+  let frame = 0
+  flipTimer = setInterval(() => {
+    frame = (frame + 1) % SPRITE_FRAMES
+    strip.style.left = `${-frame * PREVIEW_WIDTH}px`
+  }, FLIP_MS)
 }
 
 function renderSelection(asset: CatalogAsset | null): void {
@@ -589,7 +554,7 @@ function renderSelection(asset: CatalogAsset | null): void {
         asset.kind,
         asset.root,
         asset.folder,
-        asset.preview,
+        asset.sprite,
         asset.thumb,
         asset.wave,
         asset.hasAlpha
@@ -597,18 +562,15 @@ function renderSelection(asset: CatalogAsset | null): void {
     : null
   if (key === shownSelection) return
   shownSelection = key
+  stopFlipbook()
   selectionRow.textContent = ''
   selectionRow.style.display = asset ? '' : 'none'
   if (!asset) return
 
   const preview = el('div', `preview${asset.hasAlpha ? ' thumb alpha' : ''}`)
-  if (asset.preview && asset.kind === 'video') {
-    videoPreview(asset, asset.preview, preview)
-  } else if (asset.preview && asset.kind === 'audio') {
-    audioPreview(asset, asset.preview, preview)
-  } else if (asset.thumb || asset.wave) {
-    preview.append(previewImage((asset.thumb ?? asset.wave) as string))
-  }
+  const still = asset.kind === 'audio' ? asset.wave : asset.thumb
+  if (asset.kind === 'video' && asset.sprite) flipbookPreview(asset.sprite, preview)
+  else if (still) preview.append(previewImage(still))
   const text = el('div', 'selection-text')
   text.append(el('div', 'name', asset.name), el('div', 'meta', `${asset.root}/${asset.folder}`))
   selectionRow.append(preview, text)
@@ -618,8 +580,13 @@ const modeSelect = el('select')
 const placeButton = el('div', 'button primary', 'Add at playhead')
 const importButton = el('div', 'button', 'Import')
 
+// Two rows: the three choices side by side in equal columns, then the two actions.
+const choiceRow = el('div', 'control-row choices')
+const actionRow = el('div', 'control-row actions')
+
 function buildControls(): void {
-  controls.append(
+  controls.append(choiceRow, actionRow)
+  choiceRow.append(
     trackSelect('Video track', state.options.videoTrack, (value) => {
       state.options.videoTrack = value
       saveOptions()
@@ -651,7 +618,8 @@ function buildControls(): void {
     const asset = selected()
     if (asset) void importSelected(asset)
   })
-  controls.append(modeSelect, placeButton, importButton)
+  choiceRow.append(modeSelect)
+  actionRow.append(placeButton, importButton)
 }
 
 function setDisabled(node: HTMLElement, disabled: boolean): void {

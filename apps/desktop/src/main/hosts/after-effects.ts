@@ -82,6 +82,25 @@ async function isRunning(install: AfterEffectsInstall): Promise<boolean> {
 }
 
 /**
+ * osascript arguments that make the named After Effects run a script file. Both values travel as
+ * argv, never spliced into AppleScript source. The app is named at run time, so AppleScript
+ * can't load After Effects' vocabulary and doesn't know the word "DoScriptFile" (error -1708);
+ * its raw event code is used instead.
+ */
+export function runScriptFileArgs(appName: string, scriptPath: string): string[] {
+  return [
+    '-e',
+    'on run argv',
+    '-e',
+    'tell application (item 1 of argv) to «event miscfile» (POSIX file (item 2 of argv))',
+    '-e',
+    'end run',
+    appName,
+    scriptPath
+  ]
+}
+
+/**
  * Runs the import script in the After Effects that's already open. Never launches After Effects:
  * if it isn't running, the user is asked to open it first.
  */
@@ -107,16 +126,7 @@ export async function sendToAfterEffects(job: AfterEffectsJob): Promise<string> 
     if (process.platform === 'win32') {
       await run(install.target, ['-r', script])
     } else {
-      await run('osascript', [
-        '-e',
-        'on run argv',
-        '-e',
-        'tell application (item 1 of argv) to DoScriptFile (item 2 of argv)',
-        '-e',
-        'end run',
-        install.target,
-        script
-      ])
+      await run('osascript', runScriptFileArgs(install.target, script))
     }
   } finally {
     // Give After Effects a moment to read the script before it's removed.

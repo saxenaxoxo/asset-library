@@ -7,7 +7,8 @@ import {
 } from '../../src/main/hosts/after-effects-script'
 
 vi.mock('electron', () => ({}))
-const { sortAfterEffectsFolders } = await import('../../src/main/hosts/after-effects')
+const { runScriptFileArgs, sortAfterEffectsFolders } =
+  await import('../../src/main/hosts/after-effects')
 
 describe('afterEffectsScript', () => {
   it('embeds the path as a safe string literal', () => {
@@ -69,5 +70,17 @@ describe('sortAfterEffectsFolders', () => {
       'Adobe After Effects CC 2019',
       'Adobe After Effects (Beta)'
     ])
+  })
+})
+
+describe('runScriptFileArgs', () => {
+  it("uses After Effects' raw DoScriptFile event and passes values as argv", () => {
+    const args = runScriptFileArgs('Adobe After Effects 2026', '/tmp/a "b".jsx')
+    const source = args.filter((_, i) => args[i - 1] === '-e').join('\n')
+    // The plain word "DoScriptFile" fails (-1708) when the app is named at run time.
+    expect(source).toContain('«event miscfile»')
+    expect(source).not.toContain('DoScriptFile')
+    expect(source).not.toContain('/tmp')
+    expect(args.slice(-2)).toEqual(['Adobe After Effects 2026', '/tmp/a "b".jsx'])
   })
 })
