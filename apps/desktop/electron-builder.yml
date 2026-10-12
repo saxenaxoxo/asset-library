@@ -11,7 +11,13 @@ files:
   - package.json
   # The drag-out icon is loaded from disk at runtime; without it macOS refuses to start a drag.
   - resources/drag-icon.png
+  # Menu-bar / notification-area icons (1x and 2x), also loaded from disk at runtime.
+  - resources/tray*.png
   - '!**/*.map'
+# The Premiere panel opens assetlibrary://start to start the engine when it isn't running.
+protocols:
+  - name: Asset Library
+    schemes: [assetlibrary]
 asarUnpack:
   - resources/**
   - '**/*.node'
@@ -29,6 +35,7 @@ mac:
     - out/**
     - package.json
     - resources/drag-icon.png
+    - resources/tray*.png
     - '!**/*.map'
     # Only ship the SQLite binaries this platform can load.
     - '!**/better-sqlite3/prebuilds/{linux,linuxmusl,win32}-*'
@@ -57,6 +64,7 @@ win:
     - out/**
     - package.json
     - resources/drag-icon.png
+    - resources/tray*.png
     - '!**/*.map'
     - '!**/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*'
     - '!**/better-sqlite3/prebuilds/win32-arm64.node'

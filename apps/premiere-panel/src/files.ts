@@ -72,7 +72,8 @@ export async function locateCatalog(): Promise<string | null> {
 
 /** Lets the user point the panel at catalog.json by hand, and remembers the choice. */
 export async function chooseCatalog(): Promise<string | null> {
-  const entry = await lfs.getFileForOpening({ types: ['json'] })
+  const picked = await lfs.getFileForOpening({ types: ['json'] })
+  const entry = Array.isArray(picked) ? picked[0] : picked
   if (!entry) return null
   try {
     storage.set(CUSTOM_CATALOG_TOKEN, await lfs.createPersistentToken(entry))
@@ -80,6 +81,61 @@ export async function chooseCatalog(): Promise<string | null> {
     // Can't remember the choice; it still works for this session.
   }
   return entry.nativePath
+}
+
+/** Splits an absolute path into its folder and file name (either separator). */
+export function splitPath(path: string): { dir: string; name: string } {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return { dir: path.slice(0, cut), name: path.slice(cut + 1) }
+}
+
+/** Joins a folder and a name with the folder's own separator. */
+export function joinPath(dir: string, name: string): string {
+  const separator = dir.includes('\\') && !dir.includes('/') ? '\\' : '/'
+  return dir.endsWith(separator) ? `${dir}${name}` : `${dir}${separator}${name}`
+}
+
+/** Creates a folder (and its parents) if it doesn't exist. Never throws. */
+export async function ensureFolder(path: string): Promise<void> {
+  try {
+    await fs.mkdir(path, { recursive: true })
+  } catch {
+    // Already there, or this host has no mkdir; the write below reports a real problem.
+  }
+}
+
+/** Writes a UTF-8 text file by absolute path, trying each file API this host might have. */
+export async function writeText(path: string, text: string): Promise<void> {
+  try {
+    await fs.writeFile(path, text, { encoding: 'utf-8' })
+    return
+  } catch {
+    // try the next API
+  }
+  try {
+    await fs.writeFile(fileUrl(path), text, { encoding: 'utf-8' })
+    return
+  } catch {
+    // try the next API
+  }
+  const { dir, name } = splitPath(path)
+  const folder = await lfs.getEntryWithUrl(fileUrl(dir))
+  const file = await folder.createFile(name, { overwrite: true })
+  await file.write(text, { format: uxp.storage.formats.utf8 })
+}
+
+/** Lets the editor pick a folder. Returns its path, or null if they cancelled. */
+export async function pickFolder(): Promise<string | null> {
+  const folder = await lfs.getFolder()
+  return folder ? (folder.nativePath as string) : null
+}
+
+/** Lets the editor pick one or more files. Returns their paths (empty if they cancelled). */
+export async function pickFiles(): Promise<string[]> {
+  const picked = await lfs.getFileForOpening({ allowMultiple: true })
+  if (!picked) return []
+  const list = (Array.isArray(picked) ? picked : [picked]) as { nativePath: string }[]
+  return list.map((entry) => entry.nativePath)
 }
 
 export async function loadCatalog(path: string): Promise<Catalog> {

@@ -17,6 +17,8 @@ const CHANGE_THROTTLE_MS = 400
 const PROGRESS_THROTTLE_MS = 250
 const MEDIA_BATCH = 8
 const CATALOG_DEBOUNCE_MS = 1500
+/** Favorites and tags changed by hand show up in the panel this fast, even while indexing. */
+const CATALOG_URGENT_MS = 300
 /** The catalog is rewritten at most this often while the library keeps changing (indexing). */
 const CATALOG_MIN_INTERVAL_MS = 10_000
 /** Cached media younger than this is never cleaned up: it may belong to a job still running. */
@@ -34,12 +36,19 @@ export class LibraryService {
   /** Running scans, so removing a root can stop its scan. */
   private readonly scanning = new Map<number, AbortController>()
   private readonly lastProgress = new Map<number, number>()
+  /** Files seen so far by each running scan, for the engine status and the tray. */
+  private readonly filesSeen = new Map<number, number>()
+  /** Roots to scan once more when their current scan ends (files were added meanwhile). */
+  private readonly rescanAgain = new Set<number>()
+  /** Bumped when the media cache is cleared, so a job that started before is thrown away. */
+  private mediaEpoch = 0
   private probing = false
   private changeTimer: NodeJS.Timeout | null = null
   private generating = false
   private catalogTimer: NodeJS.Timeout | null = null
   private catalogWriting: Promise<void> | null = null
   private catalogDirty = false
+  private catalogUrgent = false
   private lastCatalogAt = 0
   private cleaning = false
   /** Set on quit. After this, late results from the worker are ignored: the database is closing. */
@@ -90,20 +99,36 @@ export class LibraryService {
   /** Call after favorites or tags change so the panel's catalog stays current. */
   organizingChanged(): void {
     this.notifyChanged()
+    this.scheduleCatalog(true)
   }
 
   rescanAll(): void {
     for (const root of this.repo.listRoots()) void this.rescan(root.id)
   }
 
-  /** Scans one root. A second request while it's already scanning is ignored. */
-  async rescan(rootId: number): Promise<void> {
+  /** Library folders being scanned right now, and the files seen so far across them. */
+  indexing(): { rootIds: number[]; filesSeen: number } {
+    let filesSeen = 0
+    for (const count of this.filesSeen.values()) filesSeen += count
+    return { rootIds: [...this.scanning.keys()].sort((a, b) => a - b), filesSeen }
+  }
+
+  /**
+   * Scans one root. A second request while it's already scanning is ignored, unless `again` is
+   * set (files were just copied in): then the root is scanned once more when the scan ends.
+   */
+  async rescan(rootId: number, again = false): Promise<void> {
     const root = this.repo.getRoot(rootId)
-    if (!root || this.scanning.has(rootId)) return
+    if (!root) return
+    if (this.scanning.has(rootId)) {
+      if (again) this.rescanAgain.add(rootId)
+      return
+    }
     const abort = new AbortController()
     this.scanning.set(rootId, abort)
     const scanId = this.repo.startScan(rootId)
     let filesSeen = 0
+    this.filesSeen.set(rootId, 0)
     // The root can be removed while its scan runs; after that its results go nowhere.
     const gone = (): boolean => this.stopped || abort.signal.aborted || !this.repo.hasRoot(rootId)
     this.emitProgress({ rootId, state: 'scanning', filesSeen }, true)
@@ -119,6 +144,7 @@ export class LibraryService {
           if (gone()) return
           this.repo.applyScanBatch(rootId, scanId, entries)
           filesSeen += entries.length
+          this.filesSeen.set(rootId, filesSeen)
           this.emitProgress({ rootId, state: 'scanning', filesSeen })
           this.notifyChanged()
         },
@@ -168,9 +194,15 @@ export class LibraryService {
         )
       }
     } finally {
-      if (this.scanning.get(rootId) === abort) this.scanning.delete(rootId)
+      if (this.scanning.get(rootId) === abort) {
+        this.scanning.delete(rootId)
+        this.filesSeen.delete(rootId)
+      }
       this.lastProgress.delete(rootId)
       this.notifyChanged()
+      if (this.rescanAgain.delete(rootId) && !this.stopped && this.repo.hasRoot(rootId)) {
+        void this.rescan(rootId)
+      }
     }
   }
 
@@ -229,6 +261,7 @@ export class LibraryService {
         const batch = this.repo.pendingMedia(MEDIA_BATCH)
         if (batch.length === 0) break
         for (const asset of batch) {
+          const epoch = this.mediaEpoch
           try {
             const base = `${asset.id}-${asset.key}`
             const jobs = mediaPlan({
@@ -244,6 +277,8 @@ export class LibraryService {
               jobs
             })
             if (this.stopped) return
+            // The cache was cleared while this ran: its files may be gone. It's made again.
+            if (epoch !== this.mediaEpoch) continue
             this.repo.saveMedia(asset.id, asset.key, {
               thumb: files.thumb ?? null,
               sprite: files.sprite ?? null,
@@ -254,6 +289,7 @@ export class LibraryService {
           } catch (error) {
             if (this.stopped) return
             if (isCrash(error)) break outer
+            if (epoch !== this.mediaEpoch) continue
             this.repo.saveMediaError(asset.id, asset.key)
           }
         }
@@ -264,6 +300,35 @@ export class LibraryService {
     }
     // Regenerated assets leave their old files behind; sweep once the queue is drained.
     if (generated > 0 && !this.stopped) void this.cleanupMedia()
+  }
+
+  /**
+   * Empties the media cache folder (thumbnails, sprites, previews, waveforms) and queues all of
+   * them to be generated again. Only ever touches the app's own media cache folder.
+   */
+  async clearMedia(): Promise<{ removed: number; bytes: number }> {
+    this.mediaEpoch++
+    this.repo.resetAllMedia()
+    let removed = 0
+    let bytes = 0
+    const names = await readdir(this.paths.mediaDir).catch(() => [] as string[])
+    for (const name of names) {
+      const path = join(this.paths.mediaDir, name)
+      try {
+        const info = await stat(path)
+        if (!info.isFile()) continue
+        await rm(path, { force: true })
+        removed++
+        bytes += info.size
+      } catch {
+        // Locked or already gone; the regular cleanup sweeps it later.
+      }
+    }
+    if (this.stopped) return { removed, bytes }
+    this.notifyChanged()
+    this.scheduleCatalog(true)
+    void this.generateMedia()
+    return { removed, bytes }
   }
 
   /**
@@ -300,18 +365,23 @@ export class LibraryService {
 
   /**
    * Rewrites the panel's catalog once the library settles, at most every few seconds while it
-   * keeps changing, and never two writes at once.
+   * keeps changing, and never two writes at once. `urgent` (a change the user just made by hand)
+   * skips the wait.
    */
-  private scheduleCatalog(): void {
-    if (this.stopped || this.catalogTimer) return
+  private scheduleCatalog(urgent = false): void {
+    if (this.stopped) return
     if (this.catalogWriting) {
       this.catalogDirty = true
+      this.catalogUrgent ||= urgent
       return
     }
-    const wait = Math.max(
-      CATALOG_DEBOUNCE_MS,
-      this.lastCatalogAt + CATALOG_MIN_INTERVAL_MS - Date.now()
-    )
+    if (this.catalogTimer) {
+      if (!urgent) return
+      clearTimeout(this.catalogTimer)
+    }
+    const wait = urgent
+      ? CATALOG_URGENT_MS
+      : Math.max(CATALOG_DEBOUNCE_MS, this.lastCatalogAt + CATALOG_MIN_INTERVAL_MS - Date.now())
     this.catalogTimer = setTimeout(() => {
       this.catalogTimer = null
       if (this.stopped) return
@@ -324,8 +394,10 @@ export class LibraryService {
           .finally(() => {
             this.catalogWriting = null
             if (this.catalogDirty) {
+              const urgentNext = this.catalogUrgent
               this.catalogDirty = false
-              this.scheduleCatalog()
+              this.catalogUrgent = false
+              this.scheduleCatalog(urgentNext)
             }
           })
       } catch {

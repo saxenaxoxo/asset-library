@@ -11,7 +11,12 @@ let userDataDir: string
 
 function launch(): Promise<ElectronApplication> {
   const executablePath = process.env['E2E_EXECUTABLE']
-  const env = { ...process.env, ASSET_LIBRARY_TEST_ROOT: libraryDir }
+  // NO_LOGIN_ITEM: a test run must never add the app under test to the login items.
+  const env = {
+    ...process.env,
+    ASSET_LIBRARY_TEST_ROOT: libraryDir,
+    ASSET_LIBRARY_NO_LOGIN_ITEM: '1'
+  }
   return electron.launch(
     executablePath
       ? { executablePath, args: [`--user-data-dir=${userDataDir}`], env }

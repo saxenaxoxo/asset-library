@@ -11,6 +11,8 @@ export interface CatalogAsset {
   path: string
   folder: string
   root: string
+  /** The library folder's ID (added after the first release; older catalogs omit it). */
+  rootId?: number
   durationMs: number | null
   width: number | null
   height: number | null
@@ -30,7 +32,8 @@ export interface Catalog {
   version: number
   updatedAt: number
   app: string
-  roots: { id: number; label: string; online: boolean }[]
+  /** `path` was added after the first release; older catalogs omit it. */
+  roots: { id: number; label: string; online: boolean; path?: string }[]
   tags: string[]
   assets: CatalogAsset[]
 }

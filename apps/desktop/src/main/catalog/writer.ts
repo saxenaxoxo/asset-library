@@ -1,5 +1,5 @@
-import { mkdir, rename, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
+import { writeFileAtomic } from './atomic-file'
 import { safeJoin, type LibraryRepository } from '../library/repository'
 import { CATALOG_VERSION, type Catalog, type CatalogAsset } from '@catalog/types'
 
@@ -26,6 +26,7 @@ export function buildCatalog(
       path,
       folder: slash === -1 ? '' : row.relPath.slice(0, slash),
       root: rootLabel.get(row.rootId) ?? '',
+      rootId: row.rootId,
       durationMs: row.durationMs,
       width: row.width,
       height: row.height,
@@ -44,39 +45,18 @@ export function buildCatalog(
     version: CATALOG_VERSION,
     updatedAt: Date.now(),
     app: appVersion,
-    roots: roots.map((root) => ({ id: root.id, label: root.label, online: root.status === 'ok' })),
+    roots: roots.map((root) => ({
+      id: root.id,
+      label: root.label,
+      online: root.status === 'ok',
+      path: root.path
+    })),
     tags: repo.listTags().map((tag) => tag.name),
     assets
   }
 }
 
-let tempCounter = 0
-
-/** On Windows a rename onto a file the panel is reading can briefly fail; retry a few times. */
-async function renameWithRetry(from: string, to: string): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await rename(from, to)
-      return
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (attempt >= 4 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error
-      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)))
-    }
-  }
-}
-
 /** Writes catalog.json atomically (temp file + rename), so the panel never reads half a file. */
 export async function writeCatalog(dir: string, catalog: Catalog): Promise<string> {
-  await mkdir(dir, { recursive: true })
-  const target = join(dir, 'catalog.json')
-  const temp = join(dir, `catalog.${process.pid}.${++tempCounter}.tmp`)
-  try {
-    await writeFile(temp, JSON.stringify(catalog))
-    await renameWithRetry(temp, target)
-  } catch (error) {
-    await rm(temp, { force: true })
-    throw error
-  }
-  return target
+  return writeFileAtomic(dir, 'catalog.json', JSON.stringify(catalog))
 }

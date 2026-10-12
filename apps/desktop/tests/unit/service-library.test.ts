@@ -138,4 +138,88 @@ describe('LibraryService', () => {
     service.stop()
     db.close()
   })
+
+  it('reports which folders are indexing and how many files they have seen', async () => {
+    let sendBatch: ((entries: unknown[]) => void) | undefined
+    let finish: ((value: unknown) => void) | undefined
+    const { repo, service, db } = setup((request, onBatch) => {
+      if (request.type !== 'scan') return new Promise(() => undefined)
+      sendBatch = onBatch
+      return new Promise((resolve) => (finish = resolve))
+    })
+    const root = repo.addRoot('/r', 'r')
+    expect(service.indexing()).toEqual({ rootIds: [], filesSeen: 0 })
+    const scanning = service.rescan(root.id)
+    sendBatch!([file('a.mp4', 'f1'), file('b.mp4', 'f2')])
+    expect(service.indexing()).toEqual({ rootIds: [root.id], filesSeen: 2 })
+    finish!({ filesSeen: 2, complete: true })
+    await scanning
+    expect(service.indexing()).toEqual({ rootIds: [], filesSeen: 0 })
+    service.stop()
+    db.close()
+  })
+
+  it('scans once more when asked to while a scan is running (files just imported)', async () => {
+    const finishers: ((value: unknown) => void)[] = []
+    const { repo, service, db } = setup((request) => {
+      if (request.type !== 'scan') return new Promise(() => undefined)
+      return new Promise((resolve) => finishers.push(resolve))
+    })
+    const root = repo.addRoot('/r', 'r')
+    const first = service.rescan(root.id)
+    void service.rescan(root.id) // a plain second request is ignored…
+    void service.rescan(root.id, true) // …but "again" queues one more scan
+    expect(finishers).toHaveLength(1)
+    finishers[0]!({ filesSeen: 0, complete: true })
+    await first
+    await vi.waitFor(() => expect(finishers).toHaveLength(2))
+    finishers[1]!({ filesSeen: 0, complete: true })
+    await vi.waitFor(() => expect(service.indexing().rootIds).toEqual([]))
+    expect(finishers).toHaveLength(2)
+    service.stop()
+    db.close()
+  })
+
+  it('clears the media cache, queues everything again, and drops results made before', async () => {
+    const mediaDir = tempDir()
+    let finishMedia: ((value: unknown) => void) | undefined
+    let mediaJobs = 0
+    const { repo, service, db } = setup(async (request, onBatch) => {
+      if (request.type === 'scan') {
+        onBatch?.([file('a.mp4', 'f1')])
+        return { filesSeen: 1, complete: true }
+      }
+      if (request.type === 'media') {
+        mediaJobs++
+        return new Promise((resolve) => (finishMedia = resolve))
+      }
+      return new Promise(() => undefined)
+    }, mediaDir)
+    const root = repo.addRoot('/r', 'r')
+    await service.rescan(root.id)
+    const id = repo.query({}).items[0]!.id
+    db.prepare(`update assets set probe_state = 'done' where id = ?`).run(id)
+    repo.saveMedia(id, 'f1', { thumb: 'old.jpg', sprite: null, preview: null, wave: null })
+    writeFileSync(join(mediaDir, 'old.jpg'), 'x'.repeat(10))
+    writeFileSync(join(mediaDir, 'orphan.jpg'), 'x'.repeat(5))
+    expect(repo.pendingMediaCount()).toBe(0)
+
+    // A job for another (pending) asset is already running when the cache is cleared.
+    db.prepare(`update assets set media_state = 'pending', thumb_file = null`).run()
+    void service.generateMedia()
+    expect(mediaJobs).toBe(1)
+    expect(await service.clearMedia()).toEqual({ removed: 2, bytes: 15 })
+    expect(readdirSync(mediaDir)).toEqual([])
+    expect(repo.pendingMediaCount()).toBe(1)
+
+    // The job that started before the clear finishes: its result is thrown away and redone.
+    finishMedia!({ thumb: 'stale.jpg' })
+    await vi.waitFor(() => expect(mediaJobs).toBe(2))
+    expect(repo.mediaFiles(id)?.thumb).toBeNull()
+    finishMedia!({ thumb: 'fresh.jpg' })
+    await vi.waitFor(() => expect(repo.mediaFiles(id)?.thumb).toBe('fresh.jpg'))
+    expect(repo.pendingMediaCount()).toBe(0)
+    service.stop()
+    db.close()
+  })
 })

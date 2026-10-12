@@ -6,12 +6,16 @@ declare function require(id: 'os'): { homedir?: () => string; platform?: () => s
 
 interface UxpEntry {
   nativePath: string
+  name?: string
   isFile?: boolean
   read(options?: { format?: unknown }): Promise<string | ArrayBuffer>
+  write(data: string, options?: { format?: unknown }): Promise<unknown>
+  createFile(name: string, options?: { overwrite?: boolean }): Promise<UxpEntry>
 }
 
 interface UxpModule {
   host: { name: string; version: string }
+  shell?: { openExternal(url: string, reason?: string): Promise<unknown> }
   storage: {
     formats: { utf8: unknown; binary: unknown }
     localFileSystem: {
@@ -19,7 +23,8 @@ interface UxpModule {
       getFileForOpening(options?: {
         types?: string[]
         allowMultiple?: boolean
-      }): Promise<UxpEntry | null>
+      }): Promise<UxpEntry | UxpEntry[] | null>
+      getFolder(): Promise<UxpEntry | null>
       getEntryWithUrl(url: string): Promise<UxpEntry>
       createPersistentToken(entry: UxpEntry): Promise<string>
       getEntryForPersistentToken(token: string): Promise<UxpEntry>
@@ -30,4 +35,6 @@ interface UxpModule {
 interface UxpFs {
   readFile(path: string, options?: { encoding?: string }): Promise<string | ArrayBuffer>
   lstat(path: string): Promise<{ mtimeMs?: number; mtime?: Date; size?: number }>
+  writeFile(path: string, data: string, options?: { encoding?: string }): Promise<unknown>
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<unknown>
 }

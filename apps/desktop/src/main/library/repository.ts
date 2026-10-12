@@ -541,6 +541,29 @@ export class LibraryRepository {
     ).run(id, key)
   }
 
+  /**
+   * Forgets every generated thumbnail, sprite, preview and waveform, so all of them are made
+   * again (used after the media cache folder is emptied). Returns how many assets were reset.
+   */
+  resetAllMedia(): number {
+    return this.db
+      .prepare(
+        `update assets set media_state = 'pending', media_key = null, thumb_file = null,
+           sprite_file = null, preview_file = null, wave_file = null`
+      )
+      .run().changes
+  }
+
+  /** How many available assets are still waiting for thumbnails or previews. */
+  pendingMediaCount(): number {
+    const row = this.sql(
+      `select count(*) as n from assets a join roots r on r.id = a.root_id
+       where a.media_state = 'pending' and a.status = 'ok' and r.status = 'ok'
+         and a.kind != 'template'`
+    ).get() as { n: number }
+    return row.n
+  }
+
   /** Cached media file names for an asset (relative to the media folder). */
   mediaFiles(id: string): MediaFiles | null {
     const row = this.db

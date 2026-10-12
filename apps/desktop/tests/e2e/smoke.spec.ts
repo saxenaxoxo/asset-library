@@ -1,19 +1,25 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 
 // Launches the built app (run `electron-vite build` first; `pnpm test:e2e` does both).
+// E2E_EXECUTABLE runs the same tests against a packaged app instead of the dev build.
+function launch(userDataDir: string, ...extra: string[]): Promise<ElectronApplication> {
+  const executablePath = process.env['E2E_EXECUTABLE']
+  const args = [`--user-data-dir=${userDataDir}`, ...extra]
+  // A test run must never add the app under test to the login items.
+  const env = { ...process.env, ASSET_LIBRARY_NO_LOGIN_ITEM: '1' }
+  return electron.launch(
+    executablePath ? { executablePath, args, env } : { args: ['.', ...args], env }
+  )
+}
+
 test('launches into the branded empty library', async () => {
   // A throwaway profile: never touches the real library, and runs beside an open copy of the app.
   const userDataDir = mkdtempSync(join(tmpdir(), 'asset-library-e2e-'))
-  // E2E_EXECUTABLE runs the same test against a packaged app instead of the dev build.
   const executablePath = process.env['E2E_EXECUTABLE']
-  const app = await electron.launch(
-    executablePath
-      ? { executablePath, args: [`--user-data-dir=${userDataDir}`] }
-      : { args: ['.', `--user-data-dir=${userDataDir}`] }
-  )
+  const app = await launch(userDataDir)
   const page = await app.firstWindow()
 
   await expect(page).toHaveTitle('Asset Library')
@@ -76,6 +82,15 @@ test('launches into the branded empty library', async () => {
     nativeImage.createFromPath(`${electronApp.getAppPath()}/resources/drag-icon.png`).isEmpty()
   )
   expect(dragIconEmpty).toBe(false)
+  // So do the menu-bar / notification-area icons, at both sizes.
+  const trayIconSizes = await app.evaluate(({ app: electronApp, nativeImage }) =>
+    ['trayTemplate.png', 'trayTemplate@2x.png', 'tray.png', 'tray@2x.png'].map(
+      (name) =>
+        nativeImage.createFromPath(`${electronApp.getAppPath()}/resources/${name}`).getSize().width
+    )
+  )
+  // Sizes are in points: the @2x files are 32 px images of a 16-point icon.
+  expect(trayIconSizes).toEqual([16, 16, 16, 16])
 
   // Our own menu, not Electron's default (which links to Electron and opens dev tools).
   const menu = await app.evaluate(
@@ -85,6 +100,62 @@ test('launches into the branded empty library', async () => {
 
   await page.waitForTimeout(800) // let the one-time shelf animation settle
   await page.screenshot({ path: 'test-results/shell.png' })
+
+  // Closing the window keeps the engine running for the Premiere panel.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
+  await expect
+    .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length))
+    .toBe(0)
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  expect(await app.evaluate(({ app: electronApp }) => electronApp.isReady())).toBe(true)
   await app.close()
   rmSync(userDataDir, { recursive: true, force: true })
+})
+
+test('runs in the background as the engine for the Premiere panel', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'asset-library-e2e-'))
+  const folder = mkdtempSync(join(tmpdir(), 'asset-library-e2e-folder-'))
+  const catalogDir = join(userDataDir, 'catalog')
+  const app = await launch(userDataDir, '--background')
+  const readJson = (name: string): Record<string, unknown> | null => {
+    const file = join(catalogDir, name)
+    if (!existsSync(file)) return null
+    try {
+      return JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+
+  // The engine reports in without opening a window.
+  await expect.poll(() => readJson('engine.json')?.['version'], { timeout: 15_000 }).toBe('0.1.0')
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(0)
+
+  // A request from the panel is carried out and its result shows up in engine.json.
+  mkdirSync(join(catalogDir, 'requests'), { recursive: true })
+  writeFileSync(
+    join(catalogDir, 'requests', 'e2e-add.json'),
+    JSON.stringify({ type: 'add-folder', path: folder })
+  )
+  await expect
+    .poll(
+      () =>
+        (readJson('engine.json')?.['results'] as { id: string; ok: boolean }[] | undefined)?.find(
+          (result) => result.id === 'e2e-add'
+        )?.ok,
+      { timeout: 15_000 }
+    )
+    .toBe(true)
+  await expect
+    .poll(
+      () => (readJson('catalog.json')?.['roots'] as { path: string }[] | undefined)?.[0]?.path,
+      {
+        timeout: 15_000
+      }
+    )
+    .toBe(folder)
+
+  await app.close()
+  rmSync(userDataDir, { recursive: true, force: true })
+  rmSync(folder, { recursive: true, force: true })
 })

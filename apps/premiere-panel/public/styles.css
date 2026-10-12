@@ -39,6 +39,63 @@ body {
   height: 100vh;
 }
 
+.topbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.spacer {
+  flex-grow: 1;
+}
+
+.segmented {
+  display: flex;
+  flex-direction: row;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.segment {
+  padding: 3px 12px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.segment:hover {
+  color: var(--ink);
+}
+
+.segment.active {
+  background: var(--brand-surface);
+  color: var(--brand-200);
+}
+
+.icon-button {
+  width: 24px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 5px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.icon-button:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.icon-button.active {
+  background: var(--brand-surface);
+  color: var(--brand-200);
+}
+
 .header {
   padding: 8px 8px 6px 8px;
   border-bottom: 1px solid var(--line);
@@ -82,6 +139,148 @@ body {
   background: var(--brand-surface);
   border-color: var(--brand-500);
   color: var(--brand-200);
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+}
+
+/* Folder tree (Folders view). */
+.tree {
+  flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.tree-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 6px 4px 10px;
+}
+
+.tree-title {
+  flex-grow: 1;
+  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.tree-section {
+  padding: 10px 10px 3px 10px;
+  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.tree-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 24px;
+  padding-right: 8px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.tree-row:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.tree-row.selected {
+  background: var(--brand-surface);
+  color: var(--brand-200);
+}
+
+.tree-row.offline {
+  color: var(--ink-3);
+}
+
+.caret {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--ink-3);
+  font-size: 10px;
+  text-align: center;
+}
+
+.tree-icon {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--brand-400);
+  font-size: 11px;
+}
+
+.tree-label {
+  flex-grow: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-count {
+  flex-shrink: 0;
+  margin-left: 6px;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.button.tree-add {
+  margin: 8px 10px;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 32px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.toolbar .button {
+  margin: 0 0 0 6px;
+  padding: 3px 10px;
+}
+
+.crumbs {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+
+.crumb.link {
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.crumb.link:hover {
+  color: var(--ink);
+}
+
+.crumb-sep {
+  margin: 0 5px;
+  color: var(--ink-3);
 }
 
 .grid {
@@ -149,8 +348,31 @@ body {
   color: var(--brand-200);
 }
 
-.badge.fav {
+.star {
+  position: absolute;
+  right: 3px;
+  top: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: rgba(18, 18, 22, 0.7);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.star.on {
   color: var(--brand-400);
+  opacity: 1;
+}
+
+.tile:hover .star,
+.tile.selected .star {
+  opacity: 1;
+}
+
+.star:hover {
+  color: var(--brand-300);
 }
 
 .name {
@@ -177,6 +399,14 @@ body {
   line-height: 1.5;
 }
 
+.message-actions {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
 .message .title {
   color: var(--ink);
   font-size: 13px;
@@ -187,34 +417,6 @@ body {
   border-top: 1px solid var(--line);
   background: var(--panel);
   padding: 8px;
-}
-
-.selection {
-  display: flex;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.preview {
-  position: relative;
-  width: 96px;
-  height: 54px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--raised);
-  margin-right: 8px;
-  flex-shrink: 0;
-}
-
-.preview img.strip {
-  position: absolute;
-  left: 0;
-  top: 0;
-}
-
-.selection-text {
-  flex: 1;
-  overflow: hidden;
 }
 
 .control-row {
@@ -277,6 +479,176 @@ body {
 
 .button.primary:hover {
   background: var(--brand-500);
+}
+
+.button.small {
+  padding: 2px 8px;
+  margin: 0 0 0 6px;
+  font-size: 11px;
+}
+
+.button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Tags of the selected asset. */
+.tag-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.tag-row .button.small {
+  margin: 0 0 2px 0;
+}
+
+.tag {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 1px 4px 1px 8px;
+  margin: 0 4px 2px 0;
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.tag-x {
+  margin-left: 4px;
+  padding: 0 3px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.tag-x:hover {
+  color: var(--ink);
+}
+
+.tag-input {
+  width: 110px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--brand-500);
+  border-radius: 9px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+/* Settings. */
+.settings {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 12px 12px 12px;
+}
+
+.settings-section {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-title {
+  margin-bottom: 8px;
+  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.settings-line {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.settings-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.settings-text.muted,
+.settings-hint {
+  color: var(--ink-3);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-actions {
+  display: flex;
+  flex-direction: row;
+  margin-top: 8px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 4px;
+  background: var(--ink-3);
+  flex-shrink: 0;
+}
+
+.dot.on {
+  background: #4ade80;
+}
+
+.folder-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.folder-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-name {
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-meta {
+  color: var(--ink-3);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.check-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.checkbox {
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  margin-right: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  text-align: center;
+  font-size: 10px;
+  color: #ffffff;
+}
+
+.checkbox.on {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
 }
 
 .button.disabled {

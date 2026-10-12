@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
@@ -19,6 +27,7 @@ const FFMPEG = join(
 test.skip(!existsSync(FFMPEG), 'Needs the bundled FFmpeg to make thumbnails')
 
 let home: string
+let catalogDir: string
 
 function thumb(file: string, source: string): string {
   execFileSync(FFMPEG, [
@@ -39,6 +48,7 @@ function thumb(file: string, source: string): string {
 test.beforeAll(() => {
   home = mkdtempSync(join(tmpdir(), 'asset-library-panel-'))
   const dir = join(home, 'Library', 'Application Support', 'Asset Library', 'catalog')
+  catalogDir = dir
   const media = join(home, 'media')
   mkdirSync(dir, { recursive: true })
   mkdirSync(media, { recursive: true })
@@ -55,7 +65,7 @@ test.beforeAll(() => {
     version: 1,
     updatedAt: 1,
     app: '0.1.0',
-    roots: [{ id: 1, label: 'SSD', online: true }],
+    roots: [{ id: 1, label: 'SSD', online: true, path: '/Volumes/SSD' }],
     tags: [],
     assets: [
       {
@@ -109,23 +119,77 @@ test.beforeAll(() => {
 
 test.afterAll(() => rmSync(home, { recursive: true, force: true }))
 
-test('panel lists the library, searches, and places the selection at the playhead', async () => {
+/** Request files the panel has written for the engine, oldest first. */
+function requests(): Record<string, unknown>[] {
+  const dir = join(catalogDir, 'requests')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .sort()
+    .map((name) => JSON.parse(readFileSync(join(dir, name), 'utf8')) as Record<string, unknown>)
+}
+
+function requestIds(): string[] {
+  const dir = join(catalogDir, 'requests')
+  return existsSync(dir)
+    ? readdirSync(dir)
+        .sort()
+        .map((name) => name.replace(/\.json$/, ''))
+    : []
+}
+
+/** Pretends the engine is running, optionally reporting results for requests. */
+function engineStatus(results: { id: string; ok: boolean; message: string }[] = []): void {
+  writeFileSync(
+    join(catalogDir, 'engine.json'),
+    JSON.stringify({
+      version: '0.1.0',
+      updatedAt: Date.now(),
+      indexing: { rootIds: [], filesSeen: 0 },
+      pendingMedia: 0,
+      settings: { startAtLogin: true },
+      cacheBytes: 12 * 1024 * 1024,
+      importsFolder: '/Users/me/Movies/Asset Library Imports',
+      results: results.map((r) => ({ ...r, at: Date.now() }))
+    })
+  )
+}
+
+test('panel browses folders, organizes, and places the selection at the playhead', async () => {
+  engineStatus()
   const app = await electron.launch({
     args: [join(__dirname, 'harness', 'main.cjs')],
     env: { ...process.env, HARNESS_HOME: home }
   })
   const page = await app.firstWindow()
+  const calls = (): Promise<{ type: string }[]> =>
+    page.evaluate(() => (window as unknown as { __calls: { type: string }[] }).__calls)
   const tiles = page.locator('.tile')
+
+  // Folders view is the default: the tree lists the library folder, opened, and its subfolders.
+  await expect(tiles).toHaveCount(3)
+  await expect(page.locator('.segment.active')).toHaveText('Folders')
+  await expect(page.locator('.tree-row', { hasText: 'SSD' })).toBeVisible()
+  await page.locator('.tree-row', { hasText: 'SFX' }).click()
+  await expect(tiles).toHaveCount(1)
+  await expect(page.locator('.crumbs')).toContainText('SSD')
+  await expect(page.locator('.crumbs')).toContainText('SFX')
+  await page.locator('.tree-row', { hasText: 'Favorites' }).click()
+  await expect(tiles).toHaveCount(1)
+  await page.locator('.tree-row', { hasText: 'All assets' }).click()
   await expect(tiles).toHaveCount(3)
   await expect(page.locator('.badge.alpha')).toHaveCount(1)
 
+  // Search and type filters.
   await page.fill('.search', 'leak')
   await expect(tiles).toHaveCount(1)
   await page.fill('.search', '')
   await expect(tiles).toHaveCount(3)
   await page.locator('.chip', { hasText: 'Audio' }).click()
   await expect(tiles).toHaveCount(1)
-  await page.locator('.chip', { hasText: 'All' }).click()
+  await page.locator('.chip', { hasText: 'All types' }).click()
+
+  // No selection preview: the selected tile is highlighted, nothing else.
+  await expect(page.locator('.preview')).toHaveCount(0)
 
   // Choose V2 / A2, select an overlay, add it at the playhead.
   await page.selectOption('select[aria-label="Video track"]', '1')
@@ -134,36 +198,83 @@ test('panel lists the library, searches, and places the selection at the playhea
   await page.screenshot({ path: 'test-results/panel.png' })
   await page.locator('.button.primary', { hasText: 'Add at playhead' }).click()
   await expect(page.locator('.status.ok')).toContainText('Light Leak.mov')
-
-  const calls = await page.evaluate(() => (window as unknown as { __calls: unknown[] }).__calls)
-  expect(calls).toEqual([
+  expect(await calls()).toEqual([
     { type: 'import', paths: ['/Volumes/SSD/Overlays/Light Leak.mov'], bin: 'Asset Library' },
     { type: 'overwrite', item: 'Light Leak.mov', seconds: 12.5, v: 1, a: 1 }
   ])
 
   // Adding it again reuses the imported clip instead of importing twice.
   await page.locator('.tile', { hasText: 'Light Leak.mov' }).dblclick()
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __calls: unknown[] }).__calls.length))
-    .toBe(3)
+  await expect.poll(async () => (await calls()).length).toBe(3)
 
-  // Tiles survive re-renders, so selecting one keeps the same node (and its loaded image).
+  // Favorite from the tile's star: shown at once, sent to the engine.
+  const glitch = page.locator('.tile', { hasText: 'Glitch 04.mov' })
+  await glitch.hover()
+  await glitch.locator('.star').click()
+  await expect(glitch.locator('.star.on')).toBeVisible()
+  await expect(
+    page.locator('.tree-row', { hasText: 'Favorites' }).locator('.tree-count')
+  ).toHaveText('2')
+  expect(requests().at(-1)).toEqual({ type: 'set-favorite', id: 'a', favorite: true })
+
+  // Tags on the selection.
   const whoosh = page.locator('.tile', { hasText: 'Whoosh Big.wav' })
   const node = await whoosh.elementHandle()
   await whoosh.click()
   await expect(whoosh).toHaveClass(/selected/)
   expect(await node?.evaluate((n) => n.isConnected)).toBe(true)
+  await page.locator('.tag-row .button', { hasText: '+ Tag' }).click()
+  await page.fill('.tag-input', 'impact')
+  await page.press('.tag-input', 'Enter')
+  await expect(page.locator('.tag', { hasText: 'impact' })).toBeVisible()
+  expect(requests().at(-1)).toEqual({ type: 'add-tag', id: 'c', tag: 'impact' })
+  await expect(page.locator('.tree-row', { hasText: 'impact' })).toBeVisible()
+
+  // Import copies files into the folder you're in.
+  await page.locator('.tree-row', { hasText: 'SFX' }).click()
+  await page.evaluate(() => {
+    ;(window as unknown as { __pick: unknown }).__pick = { files: ['/Users/me/Downloads/Boom.wav'] }
+  })
+  await page.locator('.toolbar .button', { hasText: 'Import' }).click()
+  await expect
+    .poll(() => requests().at(-1))
+    .toEqual({
+      type: 'import-files',
+      files: ['/Users/me/Downloads/Boom.wav'],
+      rootId: 1,
+      folder: 'SFX'
+    })
+
+  // Add a folder; the engine's result shows in the status line.
+  await page.evaluate(() => {
+    ;(window as unknown as { __pick: unknown }).__pick = { folder: '/Volumes/SSD/New Pack' }
+  })
+  await page.locator('.tree-head .button').click()
+  await expect
+    .poll(() => requests().at(-1))
+    .toEqual({ type: 'add-folder', path: '/Volumes/SSD/New Pack' })
+  engineStatus([{ id: requestIds().at(-1) as string, ok: true, message: 'Added New Pack' }])
+  await expect(page.locator('.status.ok')).toHaveText('Added New Pack')
+
+  // Settings: folders can be removed (after a confirm), files stay put.
+  await page.locator('.icon-button[title="Settings"]').click()
+  await expect(page.locator('.settings-title', { hasText: 'Library folders' })).toBeVisible()
+  await expect(page.locator('.folder-name', { hasText: 'SSD' })).toBeVisible()
+  await expect(page.locator('.settings')).toContainText('12 MB')
+  await page.locator('.folder-row .button', { hasText: 'Remove' }).click()
+  await page.locator('.folder-row .button', { hasText: 'Confirm' }).click()
+  await expect.poll(() => requests().at(-1)).toEqual({ type: 'remove-folder', rootId: 1 })
+  await page.screenshot({ path: 'test-results/panel-settings.png' })
+  await page.locator('.segment', { hasText: 'Folders' }).click()
 
   // Enter inside a menu belongs to the menu, not to "add at playhead".
+  await page.locator('.tile', { hasText: 'Whoosh Big.wav' }).click()
+  const before = (await calls()).length
   await page.locator('select[aria-label="Video track"]').dispatchEvent('keydown', { key: 'Enter' })
   await page.waitForTimeout(300)
-  expect(
-    await page.evaluate(() => (window as unknown as { __calls: unknown[] }).__calls.length)
-  ).toBe(3)
+  expect((await calls()).length).toBe(before)
   // ...while Enter elsewhere still adds the selection (imports Whoosh, then places it).
   await page.locator('.grid').dispatchEvent('keydown', { key: 'Enter' })
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __calls: unknown[] }).__calls.length))
-    .toBe(5)
+  await expect.poll(async () => (await calls()).length).toBe(before + 2)
   await app.close()
 })

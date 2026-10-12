@@ -78,11 +78,26 @@ const modules = {
   },
   uxp: {
     host: { name: 'premierepro', version: process.env.HARNESS_HOST_VERSION || '26.5.2' },
+    shell: {
+      openExternal: async (url) => {
+        calls.push({ type: 'open-url', url })
+        return true
+      }
+    },
     storage: {
       formats: { utf8: 'utf8', binary: 'binary' },
       localFileSystem: {
         getDataFolder: async () => ({ nativePath: '/tmp/none' }),
-        getFileForOpening: async () => null,
+        // The picker returns what the test queued (window.__pick), like a real choice.
+        getFileForOpening: async (options) => {
+          const files = (window.__pick && window.__pick.files) || []
+          const entries = files.map((p) => ({ nativePath: p }))
+          return options && options.allowMultiple ? entries : entries[0] || null
+        },
+        getFolder: async () => {
+          const folder = window.__pick && window.__pick.folder
+          return folder ? { nativePath: folder } : null
+        },
         getEntryWithUrl: async (url) => ({
           nativePath: toPath(url),
           read: async () => fs.readFileSync(toPath(url), 'utf8')
@@ -101,7 +116,9 @@ const modules = {
         ? data.toString('utf8')
         : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
     },
-    lstat: async (p) => fs.statSync(toPath(p))
+    lstat: async (p) => fs.statSync(toPath(p)),
+    writeFile: async (p, data) => fs.writeFileSync(toPath(p), data),
+    mkdir: async (p, options) => fs.mkdirSync(toPath(p), options)
   },
   os: { homedir: () => process.env.HARNESS_HOME }
 }
