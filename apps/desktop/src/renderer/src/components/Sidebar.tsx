@@ -62,7 +62,11 @@ function NavItem({
         <Icon size={16} strokeWidth={1.75} className={active ? 'text-brand-300' : 'text-ink-3'} />
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {count !== undefined && count > 0 && (
-          <span className="text-2xs text-ink-3 group-hover:opacity-0">
+          <span
+            className={`text-2xs text-ink-3 group-hover:opacity-0 ${
+              trailing ? 'group-focus-within:opacity-0' : ''
+            }`}
+          >
             {count.toLocaleString()}
           </span>
         )}
@@ -178,7 +182,7 @@ export function Sidebar({
                       onClick={() => onRemoveRoot(root)}
                       aria-label={`Remove ${root.label} from the library`}
                       title="Remove from library (files stay on disk)"
-                      className="absolute top-1.5 right-1.5 hidden rounded p-1 text-ink-3 group-hover:block hover:bg-canvas hover:text-ink"
+                      className="absolute top-1.5 right-1.5 rounded p-1 text-ink-3 opacity-0 outline-none group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-canvas hover:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-brand-400"
                     >
                       <Trash2 size={12} />
                     </button>

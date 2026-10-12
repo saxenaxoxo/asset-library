@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { SearchX } from 'lucide-react'
 import type { AppInfo } from '@shared/api'
 import type {
@@ -18,8 +18,8 @@ import { AssetGrid } from './components/AssetGrid'
 import { AssetList } from './components/AssetList'
 import { DetailsPanel } from './components/DetailsPanel'
 import { SettingsView } from './components/SettingsView'
-import { useAssetPages } from './hooks/useAssetPages'
-import type { ViewId, ViewMode } from './types'
+import { useAssetPages, type AssetPages } from './hooks/useAssetPages'
+import type { AssetViewHandle, ViewId, ViewMode } from './types'
 
 const VIEW_TITLES: Record<string, string> = {
   all: 'All assets',
@@ -72,6 +72,30 @@ function isTyping(target: EventTarget | null): boolean {
   )
 }
 
+/** Controls that handle Enter themselves. Asset tiles and rows are ours, so they don't count. */
+function isOtherControl(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.closest('[role=gridcell], [role=option], [role=listbox]')) return false
+  return (
+    target.isContentEditable ||
+    target.closest(
+      'button, a, [role=button], [role=link], input, textarea, select, [contenteditable]'
+    ) !== null
+  )
+}
+
+interface Selection {
+  asset: AssetRecord
+  /** Where the asset was when selected; checked against its ID before use, since results move. */
+  index: number
+}
+
+/** The selection's current position, or undefined if it isn't among the loaded pages. */
+function selectionIndex(selection: Selection, pages: AssetPages): number | undefined {
+  if (pages.itemAt(selection.index)?.id === selection.asset.id) return selection.index
+  return pages.indexOf(selection.asset.id)
+}
+
 export default function App(): React.JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
   const [roots, setRoots] = useState<RootRecord[] | null>(null)
@@ -82,11 +106,10 @@ export default function App(): React.JSX.Element {
   const [text, setText] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [sort, setSort] = useState<AssetSort>('added')
-  const [selected, setSelected] = useState<{ id: string; index: number } | null>(null)
-  const [selectedAsset, setSelectedAsset] = useState<AssetRecord | null>(null)
-  const [scrollToIndex, setScrollToIndex] = useState<number | null>(null)
+  const [selection, setSelection] = useState<Selection | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const searchRef = useRef<HTMLInputElement>(null)
+  const viewRef = useRef<AssetViewHandle>(null)
 
   const debouncedText = useDebounced(text, 150)
   const query = useMemo<AssetQuery>(
@@ -94,6 +117,13 @@ export default function App(): React.JSX.Element {
     [activeView, sort, debouncedText]
   )
   const pages = useAssetPages(query, refreshKey)
+
+  // A new view, search or sort drops the selection: its position belongs to the old results.
+  const [selectionQuery, setSelectionQuery] = useState(query)
+  if (selectionQuery !== query) {
+    setSelectionQuery(query)
+    setSelection(null)
+  }
 
   const reloadLibrary = useCallback(() => {
     void window.assetLibrary.listRoots().then(setRoots)
@@ -115,20 +145,27 @@ export default function App(): React.JSX.Element {
     })
   }, [reloadLibrary])
 
-  // Keep the details panel in sync with the selection and with library changes.
-  useEffect(() => {
-    if (!selected) return
-    let cancelled = false
-    void window.assetLibrary.getAsset(selected.id).then((asset) => {
-      if (!cancelled) setSelectedAsset(asset)
+  // The details panel shows the record already in hand; library changes refetch it.
+  const refreshSelection = useEffectEvent(() => {
+    const id = selection?.asset.id
+    if (!id) return
+    void window.assetLibrary.getAsset(id).then((asset) => {
+      setSelection((current) => {
+        if (current?.asset.id !== id) return current
+        return asset ? { ...current, asset } : null
+      })
     })
-    return () => {
-      cancelled = true
-    }
-  }, [selected, refreshKey])
+  })
+  useEffect(() => {
+    if (refreshKey > 0) refreshSelection()
+  }, [refreshKey])
 
   const select = useCallback((asset: AssetRecord, index: number) => {
-    setSelected({ id: asset.id, index })
+    setSelection({ asset, index })
+  }, [])
+
+  const openAsset = useCallback((asset: AssetRecord) => {
+    void window.assetLibrary.revealAsset(asset.id)
   }, [])
 
   const addFolder = useCallback(async () => {
@@ -147,7 +184,7 @@ export default function App(): React.JSX.Element {
       if (!confirmed) return
       await window.assetLibrary.removeRoot(root.id)
       if (activeView === `root:${root.id}`) setActiveView('all')
-      setSelected(null)
+      setSelection(null)
       reloadLibrary()
       setRefreshKey((key) => key + 1)
     },
@@ -156,45 +193,52 @@ export default function App(): React.JSX.Element {
 
   const changeView = useCallback((view: ViewId) => {
     setActiveView(view)
-    setSelected(null)
+    setSelection(null)
   }, [])
 
   // Keyboard: Cmd/Ctrl+F search, arrows move, F favorite, Enter reveal, Esc closes details.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent): void {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
-        event.preventDefault()
-        searchRef.current?.focus()
-        return
-      }
-      if (isTyping(event.target) || activeView === 'settings') return
-      const move = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key]
-      if (move !== undefined && pages.total > 0) {
-        event.preventDefault()
-        const next = Math.min(pages.total - 1, Math.max(0, (selected?.index ?? -1) + move))
-        const asset = pages.itemAt(next)
-        if (asset) {
-          setSelected({ id: asset.id, index: next })
-          setScrollToIndex(next)
-        }
-        return
-      }
-      const current = selected && selectedAsset?.id === selected.id ? selectedAsset : null
-      if (!current) return
-      if (event.key === 'Escape') setSelected(null)
-      if (event.key.toLowerCase() === 'f' && !event.metaKey && !event.ctrlKey) {
-        void window.assetLibrary
-          .setFavorite(current.id, !current.favorite)
-          .then(() => setRefreshKey((key) => key + 1))
-      }
-      if (event.key === 'Enter') void window.assetLibrary.revealAsset(current.id)
+  // An effect event always sees the latest state, so the listener is added only once.
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault()
+      searchRef.current?.focus()
+      return
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activeView, pages, selected, selectedAsset])
+    if (event.defaultPrevented || isTyping(event.target) || activeView === 'settings') return
+    const columns = viewRef.current?.columns ?? 1
+    const move = { ArrowRight: 1, ArrowDown: columns, ArrowLeft: -1, ArrowUp: -columns }[event.key]
+    if (move !== undefined && pages.total > 0) {
+      event.preventDefault()
+      const from = selection ? selectionIndex(selection, pages) : undefined
+      const next = from === undefined ? 0 : Math.min(pages.total - 1, Math.max(0, from + move))
+      const asset = pages.itemAt(next)
+      if (asset) {
+        setSelection({ asset, index: next })
+        viewRef.current?.scrollToIndex(next)
+      }
+      return
+    }
+    const current = selection?.asset
+    if (!current) return
+    if (event.key === 'Escape') setSelection(null)
+    if (event.key.toLowerCase() === 'f' && !event.metaKey && !event.ctrlKey) {
+      void window.assetLibrary
+        .setFavorite(current.id, !current.favorite)
+        .then(() => setRefreshKey((key) => key + 1))
+    }
+    if (event.key === 'Enter' && !isOtherControl(event.target)) {
+      // Stops a focused tile from also handling Enter as a click on itself.
+      event.preventDefault()
+      void window.assetLibrary.revealAsset(current.id)
+    }
+  })
+  useEffect(() => {
+    const listener = (event: KeyboardEvent): void => onKeyDown(event)
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [])
 
-  // Only show details for the current selection (avoids a stale panel after deselecting).
-  const shownAsset = selected && selectedAsset?.id === selected.id ? selectedAsset : null
+  const shownAsset = selection?.asset ?? null
 
   const title = activeView.startsWith('root:')
     ? (roots?.find((r) => `root:${r.id}` === activeView)?.label ?? 'Folder')
@@ -242,11 +286,11 @@ export default function App(): React.JSX.Element {
     const View = viewMode === 'grid' ? AssetGrid : AssetList
     content = (
       <View
+        ref={viewRef}
         pages={pages}
-        selectedId={selected?.id ?? null}
+        selectedId={shownAsset?.id ?? null}
         onSelect={select}
-        onOpen={(asset) => void window.assetLibrary.revealAsset(asset.id)}
-        scrollToIndex={scrollToIndex}
+        onOpen={openAsset}
       />
     )
   }
@@ -285,7 +329,7 @@ export default function App(): React.JSX.Element {
                 setRefreshKey((key) => key + 1)
                 reloadLibrary()
               }}
-              onClose={() => setSelected(null)}
+              onClose={() => setSelection(null)}
             />
           )}
         </div>

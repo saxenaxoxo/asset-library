@@ -40,6 +40,15 @@ export function DetailsPanel({
   const [hostMessage, setHostMessage] = useState<{ ok: boolean; text: string } | null>(null)
   const [addToComp, setAddToComp] = useState(true)
 
+  // The panel stays mounted while the selection moves; clear what belonged to the last asset.
+  const [shownId, setShownId] = useState(asset.id)
+  if (shownId !== asset.id) {
+    setShownId(asset.id)
+    setTagDraft('')
+    setRevealFailed(false)
+    setHostMessage(null)
+  }
+
   useEffect(() => {
     void window.assetLibrary.getHosts().then(setHosts)
   }, [])

@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { AssetRecord } from '@shared/library'
 import type { AssetPages } from '../hooks/useAssetPages'
+import type { AssetViewHandle } from '../types'
 import { assetSummary } from '../lib/format'
 import { AssetThumb } from './AssetThumb'
 import { startAssetDrag } from '../lib/drag'
@@ -16,15 +17,56 @@ interface AssetGridProps {
   selectedId: string | null
   onSelect: (asset: AssetRecord, index: number) => void
   onOpen: (asset: AssetRecord) => void
-  scrollToIndex: number | null
+  ref?: React.Ref<AssetViewHandle>
 }
 
-export function AssetGrid({
+interface AssetTileProps {
+  asset: AssetRecord
+  index: number
+  selected: boolean
+  width: number
+  onSelect: (asset: AssetRecord, index: number) => void
+  onOpen: (asset: AssetRecord) => void
+}
+
+function AssetTileView({
+  asset,
+  index,
+  selected,
+  width,
+  onSelect,
+  onOpen
+}: AssetTileProps): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      role="gridcell"
+      aria-selected={selected}
+      draggable
+      onDragStart={(event) => startAssetDrag(event, asset)}
+      onClick={() => onSelect(asset, index)}
+      onDoubleClick={() => onOpen(asset)}
+      title={asset.relPath}
+      className={`group rounded-lg p-1 text-left outline-none transition-colors ${
+        selected ? 'bg-brand-surface ring-1 ring-brand-500' : 'hover:bg-raised/60'
+      } focus-visible:ring-2 focus-visible:ring-brand-400`}
+      style={{ width }}
+    >
+      <AssetThumb asset={asset} />
+      <div className="mt-1.5 truncate px-0.5 text-sm text-ink">{asset.filename}</div>
+      <div className="truncate px-0.5 text-xs text-ink-3">{assetSummary(asset)}</div>
+    </button>
+  )
+}
+
+const AssetTile = memo(AssetTileView)
+
+function AssetGridView({
   pages,
   selectedId,
   onSelect,
   onOpen,
-  scrollToIndex
+  ref
 }: AssetGridProps): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -32,6 +74,8 @@ export function AssetGrid({
   useLayoutEffect(() => {
     const element = scrollRef.current
     if (!element) return
+    // Measure before the first paint so the grid doesn't start as a single column.
+    setWidth(element.clientWidth)
     const observer = new ResizeObserver(([entry]) => setWidth(entry?.contentRect.width ?? 0))
     observer.observe(element)
     return () => observer.disconnect()
@@ -52,6 +96,16 @@ export function AssetGrid({
 
   useEffect(() => virtualizer.measure(), [rowHeight, virtualizer])
 
+  // Keyboard navigation asks for scrolling directly, so a resize never replays an old request.
+  useImperativeHandle(
+    ref,
+    () => ({
+      columns,
+      scrollToIndex: (index: number) => virtualizer.scrollToIndex(Math.floor(index / columns))
+    }),
+    [columns, virtualizer]
+  )
+
   const rows = virtualizer.getVirtualItems()
   const firstRow = rows[0]?.index ?? 0
   const lastRow = rows[rows.length - 1]?.index ?? 0
@@ -59,10 +113,6 @@ export function AssetGrid({
   useEffect(() => {
     ensureRange(firstRow * columns, (lastRow + 1) * columns - 1)
   }, [firstRow, lastRow, columns, ensureRange, pages.total])
-
-  useEffect(() => {
-    if (scrollToIndex !== null) virtualizer.scrollToIndex(Math.floor(scrollToIndex / columns))
-  }, [scrollToIndex, columns, virtualizer])
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto" role="grid" aria-label="Assets">
@@ -92,27 +142,16 @@ export function AssetGrid({
                   </div>
                 )
               }
-              const selected = asset.id === selectedId
               return (
-                <button
+                <AssetTile
                   key={asset.id}
-                  type="button"
-                  role="gridcell"
-                  aria-selected={selected}
-                  draggable
-                  onDragStart={(event) => startAssetDrag(event, asset)}
-                  onClick={() => onSelect(asset, index)}
-                  onDoubleClick={() => onOpen(asset)}
-                  title={asset.relPath}
-                  className={`group rounded-lg p-1 text-left outline-none transition-colors ${
-                    selected ? 'bg-brand-surface ring-1 ring-brand-500' : 'hover:bg-raised/60'
-                  } focus-visible:ring-2 focus-visible:ring-brand-400`}
-                  style={{ width: tileWidth }}
-                >
-                  <AssetThumb asset={asset} />
-                  <div className="mt-1.5 truncate px-0.5 text-sm text-ink">{asset.filename}</div>
-                  <div className="truncate px-0.5 text-xs text-ink-3">{assetSummary(asset)}</div>
-                </button>
+                  asset={asset}
+                  index={index}
+                  selected={asset.id === selectedId}
+                  width={tileWidth}
+                  onSelect={onSelect}
+                  onOpen={onOpen}
+                />
               )
             })}
           </div>
@@ -121,3 +160,5 @@ export function AssetGrid({
     </div>
   )
 }
+
+export const AssetGrid = memo(AssetGridView)

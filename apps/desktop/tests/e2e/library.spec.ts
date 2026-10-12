@@ -110,6 +110,33 @@ test('indexes a folder, reads media details, searches, and keeps favorites', asy
   await expect(details.locator('video')).toBeVisible()
   await page.waitForTimeout(600)
   await page.screenshot({ path: 'test-results/library.png' })
+
+  // Arrow keys move the selection; the details panel stays mounted instead of flashing.
+  await tiles.nth(0).click()
+  await expect(tiles.nth(0)).toHaveAttribute('aria-selected', 'true')
+  const panel = await details.elementHandle()
+  await page.keyboard.press('ArrowRight')
+  await expect(tiles.nth(1)).toHaveAttribute('aria-selected', 'true')
+  expect(await panel?.evaluate((element) => element.isConnected)).toBe(true)
+
+  // Down moves a whole row in the grid (clamped to the last asset).
+  const columns = await page.getByRole('row').first().getByRole('gridcell').count()
+  await tiles.nth(0).click()
+  await page.keyboard.press('ArrowDown')
+  await expect(tiles.nth(Math.min(3, columns))).toHaveAttribute('aria-selected', 'true')
+
+  // The list is reachable from the keyboard and moves one row at a time.
+  await page.getByRole('button', { name: 'List view' }).click()
+  const listbox = page.getByRole('listbox', { name: 'Assets' })
+  const options = listbox.getByRole('option')
+  await expect(options).toHaveCount(4)
+  await options.nth(0).click()
+  await expect(listbox).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true')
+  const activeId = await options.nth(1).getAttribute('id')
+  await expect(listbox).toHaveAttribute('aria-activedescendant', activeId ?? '')
+  await page.getByRole('button', { name: 'Grid view' }).click()
   await app.close()
 
   // Favorites and tags survive a restart.

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useImperativeHandle, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AudioLines, Film, Image, Layers, Star } from 'lucide-react'
 import type { AssetRecord } from '@shared/library'
 import type { AssetPages } from '../hooks/useAssetPages'
+import type { AssetViewHandle } from '../types'
 import { formatBytes, formatDuration, formatResolution } from '../lib/format'
 import { startAssetDrag } from '../lib/drag'
 
@@ -15,7 +16,16 @@ interface AssetListProps {
   selectedId: string | null
   onSelect: (asset: AssetRecord, index: number) => void
   onOpen: (asset: AssetRecord) => void
-  scrollToIndex: number | null
+  ref?: React.Ref<AssetViewHandle>
+}
+
+interface AssetRowProps {
+  asset: AssetRecord
+  index: number
+  top: number
+  selected: boolean
+  onSelect: (asset: AssetRecord, index: number) => void
+  onOpen: (asset: AssetRecord) => void
 }
 
 function folderOf(relPath: string): string {
@@ -23,12 +33,59 @@ function folderOf(relPath: string): string {
   return slash === -1 ? '' : relPath.slice(0, slash)
 }
 
-export function AssetList({
+function optionId(id: string): string {
+  return `asset-option-${id}`
+}
+
+function AssetRowView({
+  asset,
+  index,
+  top,
+  selected,
+  onSelect,
+  onOpen
+}: AssetRowProps): React.JSX.Element {
+  const Icon = KIND_ICON[asset.kind]
+  const unavailable = asset.status === 'offline' || asset.status === 'missing'
+  const folder = folderOf(asset.relPath)
+  return (
+    <div
+      id={optionId(asset.id)}
+      role="option"
+      aria-selected={selected}
+      draggable
+      onDragStart={(event) => startAssetDrag(event, asset)}
+      onClick={() => onSelect(asset, index)}
+      onDoubleClick={() => onOpen(asset)}
+      className={`absolute inset-x-0 grid cursor-default items-center gap-3 px-5 text-sm ${
+        selected ? 'bg-brand-surface' : 'hover:bg-raised/60'
+      } ${unavailable ? 'text-ink-3' : 'text-ink'}`}
+      style={{ top, height: ROW_HEIGHT, gridTemplateColumns: COLUMNS }}
+    >
+      <span className="flex min-w-0 items-center gap-2.5">
+        <Icon size={15} strokeWidth={1.75} className="shrink-0 text-ink-3" />
+        <span className="truncate">{asset.filename}</span>
+        {asset.favorite && <Star size={12} className="shrink-0 fill-brand-400 text-brand-400" />}
+        {asset.hasAlpha && <span className="shrink-0 text-2xs text-brand-300">Alpha</span>}
+      </span>
+      <span className="text-ink-2">{formatDuration(asset.durationMs) ?? '—'}</span>
+      <span className="text-ink-2">{formatResolution(asset.width, asset.height) ?? '—'}</span>
+      <span className="text-ink-2">{formatBytes(asset.size)}</span>
+      <span className="truncate text-ink-3" title={folder}>
+        {folder || '—'}
+      </span>
+    </div>
+  )
+}
+
+const AssetRow = memo(AssetRowView)
+
+function AssetListView({
   pages,
   selectedId,
   onSelect,
   onOpen,
-  scrollToIndex
+  ref
 }: AssetListProps): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({
@@ -42,9 +99,18 @@ export function AssetList({
   const last = items[items.length - 1]?.index ?? 0
   const { ensureRange } = pages
   useEffect(() => ensureRange(first, last), [first, last, ensureRange, pages.total])
-  useEffect(() => {
-    if (scrollToIndex !== null) virtualizer.scrollToIndex(scrollToIndex)
-  }, [scrollToIndex, virtualizer])
+
+  useImperativeHandle(
+    ref,
+    () => ({ columns: 1, scrollToIndex: (index: number) => virtualizer.scrollToIndex(index) }),
+    [virtualizer]
+  )
+
+  // The listbox holds focus; the selected row is announced as its active option when rendered.
+  const activeDescendant =
+    selectedId !== null && items.some((item) => pages.itemAt(item.index)?.id === selectedId)
+      ? optionId(selectedId)
+      : undefined
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -58,55 +124,38 @@ export function AssetList({
         <span>File size</span>
         <span>Folder</span>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto" role="listbox" aria-label="Assets">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-inset"
+        role="listbox"
+        aria-label="Assets"
+        tabIndex={0}
+        aria-activedescendant={activeDescendant}
+      >
         <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
           {items.map((item) => {
             const asset = pages.itemAt(item.index)
-            const style = { top: item.start, height: ROW_HEIGHT, gridTemplateColumns: COLUMNS }
             if (!asset) {
               return (
-                <div key={item.key} className="absolute inset-x-0 px-5" style={style}>
+                <div
+                  key={item.key}
+                  className="absolute inset-x-0 px-5"
+                  style={{ top: item.start, height: ROW_HEIGHT }}
+                >
                   <div className="mt-3 h-3 w-1/3 animate-pulse rounded bg-raised" />
                 </div>
               )
             }
-            const Icon = KIND_ICON[asset.kind]
-            const selected = asset.id === selectedId
-            const unavailable = asset.status === 'offline' || asset.status === 'missing'
             return (
-              <div
+              <AssetRow
                 key={asset.id}
-                role="option"
-                aria-selected={selected}
-                tabIndex={-1}
-                draggable
-                onDragStart={(event) => startAssetDrag(event, asset)}
-                onClick={() => onSelect(asset, item.index)}
-                onDoubleClick={() => onOpen(asset)}
-                className={`absolute inset-x-0 grid cursor-default items-center gap-3 px-5 text-sm ${
-                  selected ? 'bg-brand-surface' : 'hover:bg-raised/60'
-                } ${unavailable ? 'text-ink-3' : 'text-ink'}`}
-                style={style}
-              >
-                <span className="flex min-w-0 items-center gap-2.5">
-                  <Icon size={15} strokeWidth={1.75} className="shrink-0 text-ink-3" />
-                  <span className="truncate">{asset.filename}</span>
-                  {asset.favorite && (
-                    <Star size={12} className="shrink-0 fill-brand-400 text-brand-400" />
-                  )}
-                  {asset.hasAlpha && (
-                    <span className="shrink-0 text-2xs text-brand-300">Alpha</span>
-                  )}
-                </span>
-                <span className="text-ink-2">{formatDuration(asset.durationMs) ?? '—'}</span>
-                <span className="text-ink-2">
-                  {formatResolution(asset.width, asset.height) ?? '—'}
-                </span>
-                <span className="text-ink-2">{formatBytes(asset.size)}</span>
-                <span className="truncate text-ink-3" title={folderOf(asset.relPath)}>
-                  {folderOf(asset.relPath) || '—'}
-                </span>
-              </div>
+                asset={asset}
+                index={item.index}
+                top={item.start}
+                selected={asset.id === selectedId}
+                onSelect={onSelect}
+                onOpen={onOpen}
+              />
             )
           })}
         </div>
@@ -114,3 +163,5 @@ export function AssetList({
     </div>
   )
 }
+
+export const AssetList = memo(AssetListView)

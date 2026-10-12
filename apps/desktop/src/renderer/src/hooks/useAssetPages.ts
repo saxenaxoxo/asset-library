@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AssetQuery, AssetRecord } from '@shared/library'
 
 const PAGE_SIZE = 150
@@ -9,8 +9,12 @@ export interface AssetPages {
   error: string | null
   /** The asset at a position, or undefined while its page loads. */
   itemAt: (index: number) => AssetRecord | undefined
+  /** Position of an asset among the pages loaded so far, or undefined if it isn't loaded. */
+  indexOf: (id: string) => number | undefined
   /** Ask for the pages covering [start, end]; call with the virtualizer's visible range. */
   ensureRange: (start: number, end: number) => void
+  /** Changes whenever loaded items change, so memoized views know to re-render. */
+  version: number
 }
 
 /**
@@ -22,7 +26,7 @@ export function useAssetPages(query: AssetQuery, refreshKey: number): AssetPages
   // Loading = the current query hasn't returned its first page yet.
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [, setVersion] = useState(0)
+  const [version, setVersion] = useState(0)
   const pages = useRef(new Map<number, AssetRecord[]>())
   const inflight = useRef(new Set<number>())
   const generation = useRef(0)
@@ -31,8 +35,10 @@ export function useAssetPages(query: AssetQuery, refreshKey: number): AssetPages
 
   const loadPage = useCallback(
     (page: number, gen: number) => {
-      if (inflight.current.has(page)) return
-      inflight.current.add(page)
+      // Capture this generation's set: a refresh swaps in a new one while this request runs.
+      const pending = inflight.current
+      if (pending.has(page)) return
+      pending.add(page)
       window.assetLibrary
         .queryAssets({ ...query, offset: page * PAGE_SIZE, limit: PAGE_SIZE })
         .then((result) => {
@@ -49,7 +55,7 @@ export function useAssetPages(query: AssetQuery, refreshKey: number): AssetPages
             setLoadedKey(queryKey)
           }
         })
-        .finally(() => inflight.current.delete(page))
+        .finally(() => pending.delete(page))
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [queryKey]
@@ -85,6 +91,14 @@ export function useAssetPages(query: AssetQuery, refreshKey: number): AssetPages
     return pages.current.get(Math.floor(index / PAGE_SIZE))?.[index % PAGE_SIZE]
   }, [])
 
+  const indexOf = useCallback((id: string) => {
+    for (const [page, items] of pages.current) {
+      const offset = items.findIndex((item) => item.id === id)
+      if (offset !== -1) return page * PAGE_SIZE + offset
+    }
+    return undefined
+  }, [])
+
   const ensureRange = useCallback(
     (start: number, end: number) => {
       lastRange.current = [start, end]
@@ -98,5 +112,9 @@ export function useAssetPages(query: AssetQuery, refreshKey: number): AssetPages
   )
 
   const loading = loadedKey !== queryKey
-  return { total: loading ? 0 : total, loading, error, itemAt, ensureRange }
+  const shownTotal = loading ? 0 : total
+  return useMemo(
+    () => ({ total: shownTotal, loading, error, itemAt, indexOf, ensureRange, version }),
+    [shownTotal, loading, error, itemAt, indexOf, ensureRange, version]
+  )
 }

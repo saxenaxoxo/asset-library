@@ -24,7 +24,8 @@ export function AssetThumb({
   const duration = formatDuration(asset.durationMs)
   const unavailable = asset.status === 'offline' || asset.status === 'missing'
   const [frame, setFrame] = useState<number | null>(null)
-  const [broken, setBroken] = useState(false)
+  // Remember which URL failed, so a new media key (regenerated thumbnail) gets a fresh try.
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null)
 
   const still =
     asset.kind === 'audio'
@@ -34,6 +35,7 @@ export function AssetThumb({
       : asset.media.thumb
         ? mediaUrl(asset, 'thumb')
         : null
+  const broken = still !== null && still === brokenUrl
   const canScrub = scrub && asset.kind === 'video' && asset.media.sprite && !unavailable
 
   function onMove(event: React.MouseEvent<HTMLDivElement>): void {
@@ -57,7 +59,7 @@ export function AssetThumb({
           alt=""
           draggable={false}
           loading="lazy"
-          onError={() => setBroken(true)}
+          onError={() => setBrokenUrl(still)}
           className={`h-full w-full ${asset.kind === 'audio' ? 'object-fill px-3 py-6' : 'object-contain'} ${
             unavailable ? 'opacity-40' : ''
           }`}
