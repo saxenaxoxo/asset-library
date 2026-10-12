@@ -29,7 +29,10 @@ from UXP panels only from 27.0). Everything else works the same in both.
      (also `CSXS.12`), or the `PlayerDebugMode` string value under `HKCU\Software\Adobe\CSXS.11` on Windows.
    - `pnpm -C apps/premiere-panel build:cep -- --debug` adds a `.debug` file; the panel's console is
      then at http://localhost:8092 in a browser.
-3. For users, the extension is signed into a `.zxp` (see Release) and installed by the Asset Library app.
+3. For users, the extension is signed into a `.zxp` (`pnpm -C apps/premiere-panel sign:cep`, which needs
+   Adobe's `ZXPSignCmd` in `apps/premiere-panel/tools/`) and bundled into the Asset Library app, which installs
+   it through Adobe's installer under the name "Asset Library CEP". The app installs the CEP build where a
+   Premiere Pro below 27 is installed and the UXP build where 27 or later is, so nobody gets two panels.
 4. Restart Premiere Pro and open **Window → Extensions → Asset Library**.
 
 ### UXP build (Premiere 27 and later)

@@ -2,14 +2,16 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <!-- Only the panel's own files run or load here; images and sound come from local files. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src file:; style-src file:; img-src file: data: blob:; media-src file: blob:; font-src file:; connect-src 'none'"
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div id="app"></div>
-    <script>
-      // CEP keeps Node's require on cep_node; the bundle expects it as a global.
-      if (!window.require && window.cep_node) window.require = window.cep_node.require
-    </script>
+    <script src="boot.js"></script>
     <script src="index.js"></script>
   </body>
 </html>
