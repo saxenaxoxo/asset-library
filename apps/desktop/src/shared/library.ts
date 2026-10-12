@@ -27,7 +27,16 @@ export const AssetRecordSchema = z.object({
   favorite: z.boolean(),
   notes: z.string().nullable(),
   addedAt: z.number(),
-  tags: z.array(z.string())
+  tags: z.array(z.string()),
+  /** Generated previews. `key` changes whenever the file changes (cache-busting). */
+  media: z.object({
+    state: z.enum(['pending', 'done', 'error']),
+    key: z.string().nullable(),
+    thumb: z.boolean(),
+    sprite: z.boolean(),
+    preview: z.boolean(),
+    wave: z.boolean()
+  })
 })
 
 export const RootRecordSchema = z.object({

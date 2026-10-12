@@ -11,11 +11,14 @@ import { migrate, needsMigration } from './library/migrations'
 import { LibraryRepository } from './library/repository'
 import { LibraryService } from './library/service'
 import { LIBRARY_EVENT_CHANNEL } from '@shared/channels'
+import { handleAssetProtocol, registerAssetScheme } from './media/protocol'
 import { WorkerClient } from './worker/client'
 import { mediaBinaries } from './media/binaries'
 
 const devServerUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
 const rendererFileUrlPrefix = pathToFileURL(RENDERER_INDEX).href
+
+registerAssetScheme()
 
 // One running instance; a second launch focuses the existing window.
 if (!app.requestSingleInstanceLock()) {
@@ -54,11 +57,20 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
       arch: process.arch
     })
-    const library = new LibraryService(repo, worker, binaries, (event) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        window.webContents.send(LIBRARY_EVENT_CHANNEL, event)
+    const mediaDir = join(app.getPath('userData'), 'media')
+    const catalogDir = join(app.getPath('userData'), 'catalog')
+    handleAssetProtocol(repo, mediaDir)
+    const library = new LibraryService(
+      repo,
+      worker,
+      binaries,
+      { mediaDir, catalogDir, appVersion: app.getVersion() },
+      (event) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send(LIBRARY_EVENT_CHANNEL, event)
+        }
       }
-    })
+    )
     app.on('will-quit', () => {
       worker.stop()
       db.close()

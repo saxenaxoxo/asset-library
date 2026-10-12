@@ -1,3 +1,5 @@
+import type { AssetKind } from '@shared/library'
+
 export type { AssetKind, AssetQuery, AssetRecord, AssetSort, RootRecord } from '@shared/library'
 
 /** One file reported by the scanner. */
@@ -28,4 +30,23 @@ export interface ProbeResult {
   hasAlpha: boolean | null
   channels: number | null
   sampleRate: number | null
+}
+
+export interface MediaFiles {
+  thumb: string | null
+  sprite: string | null
+  preview: string | null
+  wave: string | null
+}
+
+export interface PendingMedia {
+  id: string
+  path: string
+  kind: AssetKind
+  hasAlpha: boolean | null
+  durationMs: number | null
+  width: number | null
+  height: number | null
+  /** Short content key; changes when the file changes, so cached media is never stale. */
+  key: string
 }

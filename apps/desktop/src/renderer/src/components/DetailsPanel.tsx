@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { FolderSearch, GripVertical, Plus, Star, X } from 'lucide-react'
 import type { AssetRecord, RootRecord } from '@shared/library'
 import { formatBytes, formatDuration, formatResolution } from '../lib/format'
-import { AssetThumb } from './AssetThumb'
+import { AssetPreview } from './AssetPreview'
 import { startAssetDrag } from '../lib/drag'
 
 interface DetailsPanelProps {
@@ -78,9 +78,7 @@ export function DetailsPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">
-        <div draggable onDragStart={(event) => startAssetDrag(event, asset)}>
-          <AssetThumb asset={asset} large />
-        </div>
+        <AssetPreview asset={asset} />
 
         <div className="mt-3 flex items-start gap-2">
           <h3 className="min-w-0 flex-1 text-[15px] leading-snug font-semibold break-words">

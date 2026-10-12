@@ -71,11 +71,18 @@ export function registerIpcHandlers(
   // ── Assets ───────────────────────────────────────────────────────────────
   handle(IpcChannel.queryAssets, isTrustedSender, async (query) => repo.query(query))
   handle(IpcChannel.getAsset, isTrustedSender, async ({ id }) => repo.getAsset(id))
-  handle(IpcChannel.setFavorite, isTrustedSender, async ({ id, favorite }) =>
+  handle(IpcChannel.setFavorite, isTrustedSender, async ({ id, favorite }) => {
     repo.setFavorite(id, favorite)
-  )
-  handle(IpcChannel.addTag, isTrustedSender, async ({ id, name }) => repo.addTag(id, name))
-  handle(IpcChannel.removeTag, isTrustedSender, async ({ id, name }) => repo.removeTag(id, name))
+    library.organizingChanged()
+  })
+  handle(IpcChannel.addTag, isTrustedSender, async ({ id, name }) => {
+    repo.addTag(id, name)
+    library.organizingChanged()
+  })
+  handle(IpcChannel.removeTag, isTrustedSender, async ({ id, name }) => {
+    repo.removeTag(id, name)
+    library.organizingChanged()
+  })
   handle(IpcChannel.listTags, isTrustedSender, async () => repo.listTags())
   handle(IpcChannel.getCounts, isTrustedSender, async () => repo.counts())
 

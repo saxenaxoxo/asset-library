@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
@@ -44,6 +44,47 @@ test('indexes a folder, reads media details, searches, and keeps favorites', asy
   const overlay = page.getByRole('gridcell', { name: /Purple Glow Overlay/ })
   await expect(overlay.getByText('Alpha')).toBeVisible({ timeout: 20_000 })
 
+  // Thumbnails, scrub strips, previews and waveforms are generated and actually load.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            Array.from(document.querySelectorAll('[role=gridcell] img')).filter(
+              (img) =>
+                (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0
+            ).length
+        ),
+      { timeout: 60_000 }
+    )
+    .toBe(4)
+
+  // The Premiere panel's catalog is written with every asset and its media.
+  const catalogFile = join(userDataDir, 'catalog', 'catalog.json')
+  await expect.poll(() => existsSync(catalogFile), { timeout: 20_000 }).toBe(true)
+  await expect
+    .poll(
+      () => {
+        const catalog = JSON.parse(readFileSync(catalogFile, 'utf8')) as {
+          assets: {
+            name: string
+            thumb: string | null
+            preview: string | null
+            wave: string | null
+          }[]
+        }
+        const byName = Object.fromEntries(catalog.assets.map((a) => [a.name, a]))
+        return [
+          catalog.assets.length,
+          Boolean(byName['Purple Glow Overlay.mov']?.preview),
+          Boolean(byName['Tone Hit.wav']?.wave),
+          Boolean(byName['Soft Grain.png']?.thumb)
+        ]
+      },
+      { timeout: 30_000 }
+    )
+    .toEqual([4, true, true, true])
+
   // Search by part of a name, and by folder.
   await page.getByLabel('Search assets').fill('tone')
   await expect(tiles).toHaveCount(1)
@@ -65,6 +106,9 @@ test('indexes a folder, reads media details, searches, and keeps favorites', asy
   await details.getByLabel('Add a tag').fill('impacts')
   await details.getByRole('button', { name: 'Add tag' }).click()
   await expect(details.getByText('impacts')).toBeVisible()
+  await page.getByRole('gridcell', { name: /Purple Glow Overlay/ }).click()
+  await expect(details.locator('video')).toBeVisible()
+  await page.waitForTimeout(600)
   await page.screenshot({ path: 'test-results/library.png' })
   await app.close()
 

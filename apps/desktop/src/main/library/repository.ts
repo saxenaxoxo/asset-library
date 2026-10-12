@@ -6,6 +6,8 @@ import type {
   AssetQuery,
   AssetRecord,
   AssetSort,
+  MediaFiles,
+  PendingMedia,
   ProbeResult,
   RootRecord,
   ScanEntry,
@@ -37,6 +39,12 @@ interface AssetRow {
   added_at: number
   root_status: 'ok' | 'offline'
   tags: string | null
+  media_state: 'pending' | 'done' | 'error'
+  media_key: string | null
+  thumb_file: string | null
+  sprite_file: string | null
+  preview_file: string | null
+  wave_file: string | null
 }
 
 const SORT_SQL: Record<AssetSort, string> = {
@@ -74,7 +82,15 @@ function toRecord(row: AssetRow): AssetRecord {
     favorite: row.favorite === 1,
     notes: row.notes,
     addedAt: row.added_at,
-    tags: row.tags ? row.tags.split('\u001f') : []
+    tags: row.tags ? row.tags.split('\u001f') : [],
+    media: {
+      state: row.media_state,
+      key: row.media_key,
+      thumb: row.thumb_file !== null,
+      sprite: row.sprite_file !== null,
+      preview: row.preview_file !== null,
+      wave: row.wave_file !== null
+    }
   }
 }
 
@@ -211,7 +227,7 @@ export class LibraryRepository {
     )
     const update = this.db.prepare(
       `update assets set size = ?, mtime = ?, fingerprint = ?, indexed_at = ?, last_seen_scan = ?,
-         status = ?, error_msg = ?, probe_state = 'pending'
+         status = ?, error_msg = ?, probe_state = 'pending', media_state = 'pending'
        where id = ?`
     )
     const insert = this.db.prepare(
@@ -390,6 +406,93 @@ export class LibraryRepository {
     this.db
       .prepare(`update assets set probe_state = 'error', error_msg = ? where id = ?`)
       .run(message, id)
+  }
+
+  // ── Generated media ──────────────────────────────────────────────────────
+
+  /** Assets whose details are known but whose thumbnails/previews haven't been generated. */
+  pendingMedia(limit: number): PendingMedia[] {
+    const rows = this.db
+      .prepare(
+        `select a.id, a.rel_path, a.kind, a.has_alpha, a.duration_ms, a.width, a.height, a.fingerprint,
+           r.path as root_path
+         from assets a join roots r on r.id = a.root_id
+         where a.media_state = 'pending' and a.probe_state != 'pending' and a.status = 'ok'
+           and r.status = 'ok' and a.kind != 'template'
+         order by a.favorite desc, a.added_at desc limit ?`
+      )
+      .all(limit) as {
+      id: string
+      rel_path: string
+      kind: AssetKind
+      has_alpha: number | null
+      duration_ms: number | null
+      width: number | null
+      height: number | null
+      fingerprint: string | null
+      root_path: string
+    }[]
+    return rows.flatMap((row) => {
+      const path = safeJoin(row.root_path, row.rel_path)
+      if (!path) return []
+      return [
+        {
+          id: row.id,
+          path,
+          kind: row.kind,
+          hasAlpha: row.has_alpha === null ? null : row.has_alpha === 1,
+          durationMs: row.duration_ms,
+          width: row.width,
+          height: row.height,
+          key: (row.fingerprint ?? 'nofp').slice(0, 10)
+        }
+      ]
+    })
+  }
+
+  saveMedia(id: string, key: string, files: MediaFiles): void {
+    this.db
+      .prepare(
+        `update assets set media_state = 'done', media_key = ?, thumb_file = ?, sprite_file = ?,
+           preview_file = ?, wave_file = ? where id = ?`
+      )
+      .run(key, files.thumb, files.sprite, files.preview, files.wave, id)
+  }
+
+  saveMediaError(id: string): void {
+    this.db.prepare(`update assets set media_state = 'error' where id = ?`).run(id)
+  }
+
+  /** Cached media file names for an asset (relative to the media folder). */
+  mediaFiles(id: string): MediaFiles | null {
+    const row = this.db
+      .prepare('select thumb_file, sprite_file, preview_file, wave_file from assets where id = ?')
+      .get(id) as
+      | {
+          thumb_file: string | null
+          sprite_file: string | null
+          preview_file: string | null
+          wave_file: string | null
+        }
+      | undefined
+    return row
+      ? {
+          thumb: row.thumb_file,
+          sprite: row.sprite_file,
+          preview: row.preview_file,
+          wave: row.wave_file
+        }
+      : null
+  }
+
+  /** Every cached media file name still referenced, so cleanup can remove orphans. */
+  referencedMediaFiles(): Set<string> {
+    const rows = this.db
+      .prepare('select thumb_file, sprite_file, preview_file, wave_file from assets')
+      .all() as Record<string, string | null>[]
+    const files = new Set<string>()
+    for (const row of rows) for (const value of Object.values(row)) if (value) files.add(value)
+    return files
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────

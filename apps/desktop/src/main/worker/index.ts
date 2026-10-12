@@ -1,10 +1,13 @@
 // Utility process entry: runs scanning and FFmpeg work off the main process.
 import { execFile } from 'child_process'
+import { mkdir, rm, stat } from 'fs/promises'
+import { join } from 'path'
 import { RootUnavailableError, scanRoot } from './scanner'
 import { PROBE_ARGS } from '../media/probe'
 import type { WorkerMessage, WorkerRequest } from './protocol'
 
 const FFPROBE_TIMEOUT_MS = 20_000
+const FFMPEG_TIMEOUT_MS = 90_000
 const MAX_PROBE_OUTPUT = 4 * 1024 * 1024
 
 function send(message: WorkerMessage): void {
@@ -12,9 +15,9 @@ function send(message: WorkerMessage): void {
 }
 
 /** Runs a binary with an argument array (never a shell) and returns its stdout. */
-function run(binary: string, args: string[], timeout: number): Promise<string> {
+function run(binary: string, args: string[], timeout: number, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(binary, args, { timeout, maxBuffer: MAX_PROBE_OUTPUT }, (error, stdout) => {
+    execFile(binary, args, { timeout, maxBuffer: MAX_PROBE_OUTPUT, cwd }, (error, stdout) => {
       if (error) reject(error)
       else resolve(stdout)
     })
@@ -39,6 +42,23 @@ async function handle(request: WorkerRequest): Promise<unknown> {
     }
     case 'probe':
       return run(request.ffprobePath, [...PROBE_ARGS, request.path], FFPROBE_TIMEOUT_MS)
+    case 'media': {
+      // Outputs are bare file names, so ffmpeg (run from outDir) can only write inside the cache.
+      await mkdir(request.outDir, { recursive: true })
+      const results: Record<string, string | null> = {}
+      for (const job of request.jobs) {
+        const target = join(request.outDir, job.file)
+        try {
+          await run(request.ffmpegPath, job.args, FFMPEG_TIMEOUT_MS, request.outDir)
+          const info = await stat(target)
+          results[job.output] = info.size > 0 ? job.file : null
+        } catch {
+          await rm(target, { force: true })
+          results[job.output] = null
+        }
+      }
+      return results
+    }
   }
 }
 

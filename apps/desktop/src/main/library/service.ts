@@ -5,6 +5,8 @@ import type { RootRecord, ScanProgress } from '@shared/library'
 import { parseProbe } from '../media/probe'
 import type { MediaBinaries } from '../media/binaries'
 import { WorkerError, type WorkerClient } from '../worker/client'
+import { mediaPlan } from '../media/plan'
+import { buildCatalog, writeCatalog } from '../catalog/writer'
 
 export type LibraryEvent =
   { type: 'scan-progress'; progress: ScanProgress } | { type: 'library-changed' }
@@ -12,6 +14,8 @@ export type LibraryEvent =
 const PROBE_BATCH = 24
 const PROBE_CONCURRENCY = 2
 const CHANGE_THROTTLE_MS = 400
+const MEDIA_BATCH = 8
+const CATALOG_DEBOUNCE_MS = 1500
 
 /**
  * Coordinates the library: scans roots in the worker, records results, probes media details,
@@ -21,11 +25,14 @@ export class LibraryService {
   private readonly scanning = new Set<number>()
   private probing = false
   private changeTimer: NodeJS.Timeout | null = null
+  private generating = false
+  private catalogTimer: NodeJS.Timeout | null = null
 
   constructor(
     private readonly repo: LibraryRepository,
     private readonly worker: WorkerClient,
     private readonly binaries: MediaBinaries,
+    private readonly paths: { mediaDir: string; catalogDir: string; appVersion: string },
     private readonly emit: (event: LibraryEvent) => void
   ) {}
 
@@ -33,6 +40,8 @@ export class LibraryService {
   start(): void {
     this.repo.recoverInterruptedScans()
     for (const root of this.repo.listRoots()) void this.rescan(root.id)
+    void this.probePending()
+    this.scheduleCatalog()
   }
 
   async addRoot(path: string): Promise<RootRecord> {
@@ -46,6 +55,11 @@ export class LibraryService {
 
   removeRoot(id: number): void {
     this.repo.removeRoot(id)
+    this.notifyChanged()
+  }
+
+  /** Call after favorites or tags change so the panel's catalog stays current. */
+  organizingChanged(): void {
     this.notifyChanged()
   }
 
@@ -136,6 +150,57 @@ export class LibraryService {
     } finally {
       this.probing = false
     }
+    void this.generateMedia()
+  }
+
+  /** Generates thumbnails, scrub sprites, previews and waveforms, one asset at a time. */
+  async generateMedia(): Promise<void> {
+    if (this.generating) return
+    this.generating = true
+    try {
+      for (;;) {
+        const batch = this.repo.pendingMedia(MEDIA_BATCH)
+        if (batch.length === 0) break
+        for (const asset of batch) {
+          try {
+            const base = `${asset.id}-${asset.key}`
+            const jobs = mediaPlan({
+              ...asset,
+              input: asset.path,
+              base,
+              platform: process.platform
+            })
+            const files = await this.worker.request({
+              type: 'media',
+              ffmpegPath: this.binaries.ffmpeg,
+              outDir: this.paths.mediaDir,
+              jobs
+            })
+            this.repo.saveMedia(asset.id, asset.key, {
+              thumb: files.thumb ?? null,
+              sprite: files.sprite ?? null,
+              preview: files.preview ?? null,
+              wave: files.wave ?? null
+            })
+          } catch {
+            this.repo.saveMediaError(asset.id)
+          }
+        }
+        this.notifyChanged()
+      }
+    } finally {
+      this.generating = false
+    }
+  }
+
+  /** Rewrites the panel's catalog shortly after the library settles. */
+  private scheduleCatalog(): void {
+    if (this.catalogTimer) clearTimeout(this.catalogTimer)
+    this.catalogTimer = setTimeout(() => {
+      this.catalogTimer = null
+      const catalog = buildCatalog(this.repo, this.paths.mediaDir, this.paths.appVersion)
+      writeCatalog(this.paths.catalogDir, catalog).catch(() => undefined)
+    }, CATALOG_DEBOUNCE_MS)
   }
 
   private emitProgress(progress: ScanProgress): void {
@@ -148,6 +213,7 @@ export class LibraryService {
     this.changeTimer = setTimeout(() => {
       this.changeTimer = null
       this.emit({ type: 'library-changed' })
+      this.scheduleCatalog()
     }, CHANGE_THROTTLE_MS)
   }
 }
