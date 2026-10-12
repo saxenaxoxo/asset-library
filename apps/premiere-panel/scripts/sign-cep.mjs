@@ -34,7 +34,16 @@ if (!(await access(certificate).then(() => true, () => false))) {
 const out = join(root, 'release', `Asset-Library-Premiere-CEP-${version}.zxp`)
 await mkdir(dirname(out), { recursive: true })
 await rm(out, { force: true })
-execFileSync(signer, ['-sign', dist, out, certificate, password, '-tsa', 'http://timestamp.digicert.com'], {
-  stdio: 'inherit'
-})
+// A timestamp keeps the signature valid after the certificate expires. ZXPSignCmd 4.1.2 can
+// crash while timestamping on recent macOS; the ZXP is then signed without one.
+try {
+  execFileSync(signer, ['-sign', dist, out, certificate, password, '-tsa', 'http://timestamp.digicert.com'], {
+    stdio: 'inherit'
+  })
+} catch {
+  console.warn('Timestamping failed; signing without a timestamp.')
+  await rm(out, { force: true })
+  execFileSync(signer, ['-sign', dist, out, certificate, password], { stdio: 'inherit' })
+}
+execFileSync(signer, ['-verify', out], { stdio: 'inherit' })
 console.log(`Wrote ${out}`)
