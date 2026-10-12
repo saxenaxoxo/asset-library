@@ -37,5 +37,13 @@ export default defineConfig(
     files: ['apps/premiere-panel/src/**/*.ts'],
     rules: { '@typescript-eslint/no-require-imports': 'off' }
   },
+  {
+    // CommonJS scripts (Electron test harness) use require() by design.
+    files: ['**/*.cjs'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )
