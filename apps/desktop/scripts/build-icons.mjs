@@ -15,9 +15,12 @@ console.log(`Wrote ${target}`)
 
 // Tray icons. macOS menu bar: a black-on-transparent "template" image that macOS recolours for
 // light and dark menu bars (the name must end in "Template"). Windows notification area: the
-// coloured mark. Both at 16 px plus a 2x version for high-DPI screens.
-const markSvg = await readFile(join(root, '../../packages/branding/assets/logo-mark.svg'), 'utf8')
-const monochromeSvg = Buffer.from(markSvg.replace(/fill="#[0-9a-fA-F]{3,8}"/g, 'fill="#000000"'))
+// coloured mark. Both at 16 px plus a 2x version for high-DPI screens. The template keeps the mark's
+// stepped tile opacities, so the lit tiles still read in one colour.
+const assets = join(root, '../../packages/branding/assets')
+const markSvg = await readFile(join(assets, 'goated-panels-mark.svg'), 'utf8')
+const monoSvg = await readFile(join(assets, 'goated-panels-mark-mono-on-dark.svg'), 'utf8')
+const monochromeSvg = Buffer.from(monoSvg.replace(/fill="#[0-9a-fA-F]{3,8}"/g, 'fill="#000000"'))
 for (const [name, svg] of [
   ['trayTemplate', monochromeSvg],
   ['tray', Buffer.from(markSvg)]
