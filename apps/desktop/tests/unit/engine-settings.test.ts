@@ -63,6 +63,24 @@ describe('SettingsStore', () => {
     expect(loginItem.set).not.toHaveBeenCalled()
   })
 
+  it('writes the remembered choice again after the app was renamed', () => {
+    writeFileSync(file, JSON.stringify({ startAtLogin: true }))
+    os = false // the OS entry still names the old app, so it doesn't match this one
+    const store = new SettingsStore(file, loginItem)
+    store.init({ reapplyLoginItem: true })
+    expect(loginItem.set).toHaveBeenCalledExactlyOnceWith(true)
+    expect(store.settings.startAtLogin).toBe(true)
+    expect(saved()).toEqual({ startAtLogin: true })
+  })
+
+  it('keeps "off" off when re-applying after the rename', () => {
+    writeFileSync(file, JSON.stringify({ startAtLogin: false }))
+    const store = new SettingsStore(file, loginItem)
+    store.init({ reapplyLoginItem: true })
+    expect(loginItem.set).toHaveBeenCalledExactlyOnceWith(false)
+    expect(store.settings.startAtLogin).toBe(false)
+  })
+
   it('treats a damaged file as a first run', () => {
     writeFileSync(file, '{ broken')
     const store = new SettingsStore(file, loginItem)

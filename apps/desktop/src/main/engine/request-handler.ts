@@ -31,6 +31,8 @@ export interface RequestEnvironment {
     play(id: string): Promise<{ ok: true } | { ok: false; problem: string }>
     stop(): void
   }
+  /** Asks the editor to confirm, then uninstalls the app. Absent: not offered (development). */
+  uninstall?(): void
 }
 
 const NO_AUDIO = "Previewing sound from the panel isn't available in this version."
@@ -209,6 +211,10 @@ export class RequestHandler {
         if (!this.env.audio) return [false, NO_AUDIO]
         this.env.audio.stop()
         return [true, 'Stopped the sound']
+      case 'uninstall':
+        if (!this.env.uninstall) return [false, "This copy of the app can't uninstall itself."]
+        this.env.uninstall()
+        return [true, `Confirm on your screen to uninstall ${this.env.productName}.`]
     }
   }
 

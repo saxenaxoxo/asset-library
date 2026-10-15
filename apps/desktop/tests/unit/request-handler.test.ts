@@ -316,6 +316,25 @@ describe('settings and cache', () => {
     })
   })
 
+  it('passes an uninstall on to the app, which asks the editor to confirm', async () => {
+    expect(await run({ type: 'uninstall' })).toMatchObject({
+      ok: false,
+      message: "This copy of the app can't uninstall itself."
+    })
+    const uninstall = vi.fn()
+    const withUninstall = new RequestHandler(
+      library,
+      repo,
+      { productName: 'Asset Library', importsFolder, setStartAtLogin, uninstall },
+      () => 42
+    )
+    expect(await withUninstall.handle('u', { type: 'uninstall' })).toMatchObject({
+      ok: true,
+      message: 'Confirm on your screen to uninstall Asset Library.'
+    })
+    expect(uninstall).toHaveBeenCalledOnce()
+  })
+
   it('formats sizes for people', () => {
     expect(formatBytes(0)).toBe('0 bytes')
     expect(formatBytes(12_300)).toBe('12 KB')

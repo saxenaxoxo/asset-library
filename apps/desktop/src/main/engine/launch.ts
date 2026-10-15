@@ -31,7 +31,7 @@ export function engineUrlInArgv(argv: readonly string[]): string | null {
 /**
  * Whether this launch should stay in the background (no window): started at login, with
  * --background, or by the panel opening assetlibrary://start. A normal launch (double-click,
- * tests) shows the library window.
+ * tests) shows the installer window.
  */
 export function startsInBackground(launch: {
   argv: readonly string[]

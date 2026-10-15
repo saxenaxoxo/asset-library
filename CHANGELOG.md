@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Goated Panels
+
+- Asset Library is now made by **Goated Panels**. The desktop window is called **Goated Panels Hub** and wears the new Goated Panels mark and app icon; the Premiere panel's About line reads "by Goated Panels".
+- The app is now called **Goated Panels Hub** on your computer too: in Applications, the Start menu, Settings → Apps and its installers. The first time it opens it moves your library, settings and thumbnails from the old "Asset Library" data folder (one rename, nothing copied or deleted) and leaves a link under the old name so older Premiere panels still find the catalog. A copy of the old app that's still running is closed first.
+- Updating replaces the old app: on Windows the installer removes the old install and its shortcuts and installs under the new name; on macOS the old Asset Library.app goes to the Trash. Start at login carries over. The `assetlibrary://` link, the panel IDs and the panel's name in Premiere don't change.
+- The copyright holder, Windows publisher and the CEP panel's signing certificate are now Goated Panels.
+- Brand names, logos (mark, wordmark, one-colour versions, Asset Library attribution) and their rules live in `packages/branding/`. A model for describing products to a future website is documented in `docs/product/product-metadata.md` (not built).
+
+### The app is now the installer
+
+- Opening Asset Library shows an installer and manager instead of the asset browser (browsing lives in the Premiere panel). **Install** finds each Premiere Pro version through Adobe's own plug-in installer, recommends CEP (2024–2026) or UXP (2027 and later) with the reason, and lets you choose the other with a warning. **Manage** lists every installed copy with its Premiere versions and offers update and uninstall. **About** and **Help** cover the rest.
+- The panel is no longer installed silently on first launch; you install it from the window. Installed panels still update themselves when a new app version brings a newer one.
+- After Effects is shown as not available yet: there's no After Effects panel to install.
+- Drag-out and Send to After Effects, which lived in the old browser window, are gone with it.
+- The window can now reach only the installer's own commands: the old browser's commands (folders, search, tags, favorites, drag-out, Send to After Effects) are removed from the app, and macOS no longer asks to let Asset Library control After Effects.
+
+### Uninstall
+
+- "Uninstall Asset Library…" in the Premiere panel's Settings, the menu-bar icon and the macOS app menu: removes the Premiere Pro panel, the login item and the app, and optionally the library. Your own files are never touched.
+- Uninstalling from Windows Settings → Apps also removes the Premiere Pro panel and asks whether to delete the library.
+
 ### Premiere Pro panel 0.3.21 – 0.4.0
 
 - A CEP build of the panel for Premiere Pro 24–26, from the same code as the UXP build: drag assets onto the timeline, double-click or "Add at playhead" to place them. The app installs whichever build each installed Premiere needs.

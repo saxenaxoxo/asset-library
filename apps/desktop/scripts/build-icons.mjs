@@ -13,15 +13,6 @@ await mkdir(dirname(target), { recursive: true })
 await sharp(source, { density: 300 }).resize(1024, 1024).png().toFile(target)
 console.log(`Wrote ${target}`)
 
-// Small image shown under the cursor while dragging files out of the app.
-const dragIcon = join(root, 'resources/drag-icon.png')
-await mkdir(dirname(dragIcon), { recursive: true })
-await sharp(join(root, '../../packages/branding/assets/logo-mark.svg'), { density: 300 })
-  .resize(64, 64)
-  .png()
-  .toFile(dragIcon)
-console.log(`Wrote ${dragIcon}`)
-
 // Tray icons. macOS menu bar: a black-on-transparent "template" image that macOS recolours for
 // light and dark menu bars (the name must end in "Template"). Windows notification area: the
 // coloured mark. Both at 16 px plus a 2x version for high-DPI screens.

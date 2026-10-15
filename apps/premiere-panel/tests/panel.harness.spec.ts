@@ -288,6 +288,9 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await page.locator('.folder-row .button', { hasText: 'Remove' }).click()
   await page.locator('.folder-row .button', { hasText: 'Confirm' }).click()
   await expect.poll(() => requests().at(-1)).toEqual({ type: 'remove-folder', rootId: 1 })
+  // Uninstall is handed to the engine, which asks the editor to confirm in its own dialog.
+  await page.locator('.settings .button', { hasText: 'Uninstall…' }).click()
+  await expect.poll(() => requests().at(-1)).toEqual({ type: 'uninstall' })
   await page.screenshot({ path: 'test-results/panel-settings.png' })
   await page.locator('.tab', { hasText: 'Browse' }).click()
 

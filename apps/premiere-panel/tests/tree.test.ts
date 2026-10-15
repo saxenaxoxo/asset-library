@@ -149,6 +149,7 @@ describe('panel requests', () => {
       )
     ).toEqual({ type: 'import-files', files: ['/a.mov'], rootId: 1, folder: 'SFX' })
     expect(parseRequest(JSON.stringify({ type: 'clear-cache' }))).toEqual({ type: 'clear-cache' })
+    expect(parseRequest(JSON.stringify({ type: 'uninstall' }))).toEqual({ type: 'uninstall' })
   })
 
   it('rejects malformed requests instead of guessing', () => {

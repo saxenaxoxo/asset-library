@@ -12,10 +12,16 @@
     "baseUrl": ".",
     "paths": {
       "@catalog/*": ["../../packages/catalog/*"],
+      "@brand/*": ["../../packages/branding/*"],
       "@host/*": ["src/host-uxp/*"]
     }
   },
-  "include": ["src/**/*", "tests/**/*", "../../packages/catalog/**/*"],
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "../../packages/catalog/**/*",
+    "../../packages/branding/brand-identity.ts"
+  ],
   "exclude": [
     "src/host-cep/**",
     "tests/cep-host.test.ts",

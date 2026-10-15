@@ -12,7 +12,6 @@ aren't listed.
 | @electron-toolkit/utils                                                                                 | 4.0.0   | MIT                       | https://github.com/alex8088/electron-toolkit    |
 | Lucide icons (lucide-react)                                                                             | 0.548.0 | ISC                       | https://github.com/lucide-icons/lucide          |
 | Geist typeface (via @fontsource-variable/geist)                                                         | 5.3.0   | SIL Open Font License 1.1 | https://github.com/vercel/geist-font            |
-| TanStack Virtual (@tanstack/react-virtual)                                                              | 3.14.14 | MIT                       | https://github.com/TanStack/virtual             |
 | better-sqlite3                                                                                          | 13.0.3  | MIT                       | https://github.com/WiseLibs/better-sqlite3      |
 | SQLite (bundled in better-sqlite3)                                                                      | 3.x     | Public domain             | https://sqlite.org                              |
 | FFmpeg / FFprobe, macOS                                                                                 | 9.0.2   | LGPL-2.1-or-later         | https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz |

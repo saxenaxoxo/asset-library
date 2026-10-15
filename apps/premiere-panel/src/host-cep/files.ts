@@ -1,5 +1,5 @@
 // Reading the catalog and media from disk with Node, which the CEP runtime provides.
-import { catalogPath, parseCatalog, type Catalog } from '@catalog/types'
+import { catalogPaths, findCatalog, parseCatalog, type Catalog } from '@catalog/types'
 import { detectWindows, storage } from './platform'
 import { fileUrl } from '../paths'
 
@@ -37,7 +37,10 @@ export async function locateCatalog(): Promise<string | null> {
   const chosen = storage.get(CUSTOM_CATALOG_PATH)
   if (chosen) return chosen
   try {
-    return catalogPath(WINDOWS ? 'win32' : 'darwin', require('os').homedir())
+    return await findCatalog(
+      catalogPaths(WINDOWS ? 'win32' : 'darwin', require('os').homedir()),
+      fileMissing
+    )
   } catch {
     return null
   }

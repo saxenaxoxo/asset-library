@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { catalogPath, CATALOG_VERSION, parseCatalog, type CatalogAsset } from '@catalog/types'
+import {
+  catalogPaths,
+  CATALOG_VERSION,
+  findCatalog,
+  parseCatalog,
+  type CatalogAsset
+} from '@catalog/types'
 import { filterAssets, formatDuration } from '@catalog/filter'
 
 function asset(name: string, overrides: Partial<CatalogAsset> = {}): CatalogAsset {
@@ -87,14 +93,35 @@ describe('parseCatalog', () => {
   })
 })
 
-describe('catalogPath', () => {
-  it('matches where the desktop app writes it', () => {
-    expect(catalogPath('darwin', '/Users/ed')).toBe(
+describe('catalogPaths', () => {
+  it('lists where the desktop app writes it, renamed folder first', () => {
+    expect(catalogPaths('darwin', '/Users/ed')).toEqual([
+      '/Users/ed/Library/Application Support/Goated Panels Hub/catalog/catalog.json',
       '/Users/ed/Library/Application Support/Asset Library/catalog/catalog.json'
-    )
-    expect(catalogPath('win32', 'C:\\Users\\ed')).toBe(
+    ])
+    expect(catalogPaths('win32', 'C:\\Users\\ed')).toEqual([
+      'C:\\Users\\ed\\AppData\\Roaming\\Goated Panels Hub\\catalog\\catalog.json',
       'C:\\Users\\ed\\AppData\\Roaming\\Asset Library\\catalog\\catalog.json'
-    )
+    ])
+  })
+})
+
+describe('findCatalog', () => {
+  const [renamed, legacy] = catalogPaths('darwin', '/Users/ed') as [string, string]
+  const only = (present: string[]) => async (path: string) => !present.includes(path)
+
+  it('reads the renamed folder once the app has moved its data', async () => {
+    expect(await findCatalog([renamed, legacy], only([renamed, legacy]))).toBe(renamed)
+    expect(await findCatalog([renamed, legacy], only([renamed]))).toBe(renamed)
+  })
+
+  it('still finds a catalog the app has not moved yet', async () => {
+    expect(await findCatalog([renamed, legacy], only([legacy]))).toBe(legacy)
+  })
+
+  it('waits at the renamed folder when there is no catalog yet', async () => {
+    expect(await findCatalog([renamed, legacy], only([]))).toBe(renamed)
+    expect(await findCatalog([], only([]))).toBeNull()
   })
 })
 

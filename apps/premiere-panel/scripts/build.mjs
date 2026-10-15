@@ -45,6 +45,7 @@ const options = {
   external: cep ? ['fs', 'os', 'path', 'child_process'] : ['premierepro', 'uxp', 'fs', 'os'],
   alias: {
     '@catalog': join(root, '..', '..', 'packages', 'catalog'),
+    '@brand': join(root, '..', '..', 'packages', 'branding'),
     '@host': join(root, 'src', cep ? 'host-cep' : 'host-uxp')
   },
   define: { PANEL_DIAG: String(diag && !cep), PANEL_VERSION: JSON.stringify(version) },

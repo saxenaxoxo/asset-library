@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 64" role="img" aria-label="Goated Panels">
+  <!-- Goated Panels wordmark, one colour (off-white), for dark backgrounds. Text is set in Geist with system fallbacks; outline it before print or press use. -->
+  <g>
+    <path d="M15 25C13 15 10 9 5 4C15 7 24 13 29 25ZM49 25C51 15 54 9 59 4C49 7 40 13 35 25Z" fill="#F4F2EE"/>
+    <path d="M20 22H44A8 8 0 0 1 52 30V48A8 8 0 0 1 44 56H20A8 8 0 0 1 12 48V30A8 8 0 0 1 20 22ZM20.5 29H26.5A2.5 2.5 0 0 1 29 31.5V47.5A2.5 2.5 0 0 1 26.5 50H20.5A2.5 2.5 0 0 1 18 47.5V31.5A2.5 2.5 0 0 1 20.5 29ZM35.5 29H43.5A2.5 2.5 0 0 1 46 31.5V35.5A2.5 2.5 0 0 1 43.5 38H35.5A2.5 2.5 0 0 1 33 35.5V31.5A2.5 2.5 0 0 1 35.5 29ZM35.5 41H43.5A2.5 2.5 0 0 1 46 43.5V47.5A2.5 2.5 0 0 1 43.5 50H35.5A2.5 2.5 0 0 1 33 47.5V43.5A2.5 2.5 0 0 1 35.5 41Z" fill="#F4F2EE" fill-rule="evenodd"/>
+  </g>
+  <text x="76" y="42" font-family="Geist, Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.5" fill="#F4F2EE">Goated Panels</text>
+</svg>

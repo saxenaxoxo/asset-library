@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Goated Panels">
+  <!-- Goated Panels app icon: the mark on near-black with a soft glow behind the lit tile. -->
+  <defs>
+    <linearGradient id="gi-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E8E8EF"/></linearGradient>
+    <linearGradient id="gi-accent" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B07BFF"/><stop offset="1" stop-color="#4F38FF"/></linearGradient>
+    <linearGradient id="gi-mid" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#71717D"/><stop offset="1" stop-color="#4C4C57"/></linearGradient>
+    <linearGradient id="gi-dark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#40404A"/><stop offset="1" stop-color="#2C2C33"/></linearGradient>
+    <radialGradient id="gi-bg" cx="0.5" cy="0.45" r="0.6"><stop offset="0" stop-color="#15123A"/><stop offset="0.6" stop-color="#0B0A14"/><stop offset="1" stop-color="#070709"/></radialGradient>
+    <filter id="gi-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="40"/></filter>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#gi-bg)"/>
+  <rect x="270.0" y="449.02" width="302.82" height="129.41" rx="18.98" fill="#6D46FF" opacity="0.55" filter="url(#gi-glow)"/>
+  <rect x="270.0" y="316.16" width="484.0" height="99.22" rx="18.98" fill="url(#gi-top)"/>
+  <rect x="270.0" y="449.02" width="302.82" height="129.41" rx="18.98" fill="url(#gi-accent)"/>
+  <rect x="600.43" y="449.02" width="153.57" height="129.41" rx="18.98" fill="url(#gi-mid)"/>
+  <rect x="270.0" y="608.63" width="204.47" height="99.22" rx="18.98" fill="url(#gi-mid)"/>
+  <rect x="500.35" y="608.63" width="113.88" height="99.22" rx="18.98" fill="url(#gi-dark)"/>
+  <rect x="638.39" y="608.63" width="115.61" height="99.22" rx="18.98" fill="url(#gi-dark)"/>
+</svg>

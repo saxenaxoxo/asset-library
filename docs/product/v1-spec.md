@@ -1,6 +1,6 @@
 # Asset Library v1 — Product & Technical Spec
 
-Asset Library by Saxenas Creation · Status: **approved to build (2026-10-11)** · Decisions: [decisions.md](decisions.md)
+Asset Library by Goated Panels (formerly Saxenas Creation) · Status: **approved to build (2026-10-11)** · Decisions: [decisions.md](decisions.md)
 
 ## 1. What v1 is
 

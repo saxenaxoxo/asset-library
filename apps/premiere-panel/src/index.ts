@@ -23,6 +23,7 @@ import {
   type FolderNode
 } from '@catalog/tree'
 import type { EngineStatus, PanelRequest } from '@catalog/requests'
+import { brandIdentity } from '@brand/brand-identity'
 import {
   chooseCatalog,
   fileMissing,
@@ -626,7 +627,7 @@ async function request(req: PanelRequest, label: string): Promise<string | null>
     if (engineRunning(state.engine)) {
       setStatus(label)
     } else {
-      setStatus(`${label} Starting the Asset Library engine…`)
+      setStatus(`${label} Starting ${brandIdentity.hubName}…`)
       void ensureEngine()
     }
     return id
@@ -676,7 +677,7 @@ async function pollEngine(): Promise<void> {
     undoEdit(pending.request)
     applyFilter(false)
     setStatus(
-      "The Asset Library engine isn't running, so that didn't go through. Start it in Settings.",
+      `${brandIdentity.hubName} isn't running, so that didn't go through. Start it in Settings.`,
       'error'
     )
   }
@@ -1747,7 +1748,7 @@ function renderSettings(): void {
         button('Start engine', 'primary', () => {
           engineStartAt = 0
           void ensureEngine()
-          setStatus('Starting the Asset Library engine…')
+          setStatus(`Starting ${brandIdentity.hubName}…`)
         })
       )
     if (engine?.update) {
@@ -1852,6 +1853,24 @@ function renderSettings(): void {
       button('Change…', 'small', () => void chooseCatalogFile())
     )
     advanced.append(catalogLine)
+    const uninstallLine = el('div', 'settings-line')
+    uninstallLine.append(
+      el(
+        'span',
+        'settings-text muted',
+        `Remove ${brandIdentity.hubName} and this panel from this computer`
+      ),
+      button(
+        'Uninstall…',
+        'small',
+        () =>
+          void request(
+            { type: 'uninstall' },
+            `Confirm on your screen to uninstall ${brandIdentity.hubName}.`
+          )
+      )
+    )
+    advanced.append(uninstallLine)
 
     const about = section('About')
     const aboutText = el('div', 'settings-hint')
@@ -1873,7 +1892,7 @@ function renderSettings(): void {
   settingsTexts.get('cache')!.textContent =
     `Thumbnails and previews: ${engine ? formatBytes(engine.cacheBytes) : '—'}`
   settingsTexts.get('about')!.textContent =
-    `Asset Library panel ${PANEL_VERSION}${engine ? ` · engine ${engine.version}` : ''} · by Saxenas Creation`
+    `${brandIdentity.primaryProductName} panel ${PANEL_VERSION}${engine ? ` · engine ${engine.version}` : ''} · ${brandIdentity.brandAttribution}`
 }
 
 /** Opens a web page in the browser (only our own release pages are ever linked). */

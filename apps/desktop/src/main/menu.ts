@@ -5,7 +5,11 @@ import { Menu, type MenuItemConstructorOptions } from 'electron'
  * developer-tools shortcut in installed builds. macOS needs an Edit menu for copy and paste to work
  * in text fields; Windows has no menu bar (text-field shortcuts work without one).
  */
-export function applyAppMenu(platform: NodeJS.Platform, productName: string): void {
+export function applyAppMenu(
+  platform: NodeJS.Platform,
+  productName: string,
+  actions: { uninstall?: () => void } = {}
+): void {
   if (platform !== 'darwin') {
     Menu.setApplicationMenu(null)
     return
@@ -15,6 +19,9 @@ export function applyAppMenu(platform: NodeJS.Platform, productName: string): vo
       label: productName,
       submenu: [
         { role: 'about' },
+        ...(actions.uninstall
+          ? [{ label: `Uninstall ${productName}…`, click: actions.uninstall }]
+          : []),
         { type: 'separator' },
         { role: 'hide' },
         { role: 'hideOthers' },

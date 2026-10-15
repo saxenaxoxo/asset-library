@@ -1,7 +1,11 @@
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
 import { createLibrary, FFMPEG, type TestLibrary } from './harness/library'
+
+const { version } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as {
+  version: string
+}
 
 // MOCKED: the CEP build of the panel with a fake CEP bridge (see tests/harness/preload-cep.cjs).
 // The shared UI is covered by the UXP harness; this checks what the CEP host layer does
@@ -114,7 +118,7 @@ test('CEP panel places through ExtendScript and drags files the way Premiere exp
 
   // Starting the engine goes through the OS (the assetlibrary:// scheme).
   await page.locator('.tab', { hasText: 'Settings' }).click()
-  await expect(page.locator('.settings')).toContainText('Asset Library panel 0.4.0')
+  await expect(page.locator('.settings')).toContainText(`Asset Library panel ${version}`)
   await page.screenshot({ path: 'test-results/panel-cep.png' })
   await app.close()
 })

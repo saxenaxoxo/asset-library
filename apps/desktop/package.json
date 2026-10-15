@@ -1,11 +1,11 @@
 {
   "name": "asset-library",
-  "productName": "Asset Library",
+  "productName": "Goated Panels Hub",
   "version": "0.1.0",
   "private": true,
-  "description": "A free asset manager for video editors and motion designers, by Saxenas Creation.",
+  "description": "Goated Panels Hub: installs and runs Asset Library, a free asset manager for video editors, by Goated Panels.",
   "main": "./out/main/index.js",
-  "author": "Saxenas Creation",
+  "author": "Goated Panels",
   "homepage": "https://github.com/saxenaxoxo/asset-library",
   "license": "UNLICENSED",
   "scripts": {
@@ -32,7 +32,6 @@
     "@fontsource-variable/geist": "^5.3.0",
     "@playwright/test": "^1.56.1",
     "@tailwindcss/vite": "^4.3.3",
-    "@tanstack/react-virtual": "^3.14.14",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",

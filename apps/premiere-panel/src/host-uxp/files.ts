@@ -1,6 +1,6 @@
 // Reading the catalog and media from disk. UXP's file APIs differ between hosts and versions,
 // so each read tries the documented options in order and remembers what worked.
-import { catalogPath, parseCatalog, type Catalog } from '@catalog/types'
+import { catalogPaths, findCatalog, parseCatalog, type Catalog } from '@catalog/types'
 import { detectWindows, storage } from './platform'
 import { fileUrl, homeFromDataFolder } from '../paths'
 
@@ -99,7 +99,7 @@ export async function locateCatalog(): Promise<string | null> {
     }
   }
   const home = await homeFolder()
-  return home ? catalogPath(WINDOWS ? 'win32' : 'darwin', home) : null
+  return home ? findCatalog(catalogPaths(WINDOWS ? 'win32' : 'darwin', home), fileMissing) : null
 }
 
 /** Lets the user point the panel at catalog.json by hand, and remembers the choice. */

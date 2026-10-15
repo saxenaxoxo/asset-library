@@ -23,27 +23,3 @@ export function handle<C extends IpcChannelName>(
     return responseSchema.parse(response)
   })
 }
-
-/**
- * Registers a fire-and-forget handler (ipcRenderer.send). Same sender check and request
- * validation as `handle`; invalid messages are dropped and logged.
- */
-export function listen<C extends IpcChannelName>(
-  channel: C,
-  isTrustedSender: SenderCheck,
-  handler: (request: IpcRequest<C>, event: IpcMainEvent) => void
-): void {
-  const { request: requestSchema } = ipcContract[channel]
-  ipcMain.on(channel, (event, raw: unknown) => {
-    if (!isTrustedSender(event)) {
-      console.warn(`Dropped IPC message to "${channel}" from an untrusted sender`)
-      return
-    }
-    const parsed = requestSchema.safeParse(raw)
-    if (!parsed.success) {
-      console.warn(`Dropped invalid IPC message to "${channel}"`)
-      return
-    }
-    handler(parsed.data as IpcRequest<C>, event)
-  })
-}

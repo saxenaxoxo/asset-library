@@ -3,9 +3,15 @@
   "compilerOptions": {
     "paths": {
       "@catalog/*": ["../../packages/catalog/*"],
+      "@brand/*": ["../../packages/branding/*"],
       "@host/*": ["src/host-cep/*"]
     }
   },
-  "include": ["src/**/*", "tests/cep-host.test.ts", "../../packages/catalog/**/*"],
+  "include": [
+    "src/**/*",
+    "tests/cep-host.test.ts",
+    "../../packages/catalog/**/*",
+    "../../packages/branding/brand-identity.ts"
+  ],
   "exclude": ["src/host-uxp/**", "src/diag.ts"]
 }

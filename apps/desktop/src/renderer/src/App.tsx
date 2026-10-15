@@ -1,386 +1,177 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
-import { LoaderCircle, SearchX } from 'lucide-react'
-import type { AppInfo } from '@shared/api'
-import type {
-  AssetQuery,
-  AssetRecord,
-  AssetSort,
-  LibraryCounts,
-  RootRecord,
-  ScanProgress,
-  TagCount
-} from '@shared/library'
-import { Sidebar } from './components/Sidebar'
-import { TopBar } from './components/TopBar'
-import { EmptyState } from './components/EmptyState'
-import { StatusBar } from './components/StatusBar'
-import { AssetGrid } from './components/AssetGrid'
-import { AssetList } from './components/AssetList'
-import { DetailsPanel } from './components/DetailsPanel'
-import { SettingsView } from './components/SettingsView'
-import { useAssetPages, type AssetPages } from './hooks/useAssetPages'
-import { FavoriteToggle } from './lib/favorite-toggle'
-import type { AssetViewHandle, ViewId, ViewMode } from './types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ExternalLink, RevealTarget } from '@shared/api'
+import { PANEL_BUILDS, type InstalledPanel, type PanelBuild } from '@shared/installer'
+import {
+  BottomActionBar,
+  BrandHeader,
+  ConfirmationDialog,
+  SidebarNavigation,
+  type Screen
+} from './components/AppChrome'
+import { AboutScreen, HelpScreen, InstallScreen, ManageScreen } from './components/Screens'
+import { useInstaller } from './hooks/useInstaller'
+import { planInstall, type Choice, type HostApp } from './lib/install-plan'
+import { buttonClass } from './lib/ui'
 
-const VIEW_TITLES: Record<string, string> = {
-  all: 'All assets',
-  favorites: 'Favorites',
-  recent: 'Recently added',
-  video: 'Video',
-  audio: 'Audio',
-  images: 'Images',
-  templates: 'Templates and presets',
-  missing: 'Missing',
-  settings: 'Settings'
+/** What the Uninstall confirmation is about: one installed build, or every installed build. */
+type RemovalTarget = { kind: 'one'; panel: InstalledPanel } | { kind: 'all' } | null
+
+const SCREEN_TITLES: Record<Screen, string> = {
+  install: 'Install',
+  manage: 'Manage',
+  about: 'About',
+  help: 'Help'
 }
 
-function queryForView(view: ViewId): AssetQuery {
-  if (view.startsWith('root:')) return { rootId: Number(view.slice(5)) }
-  if (view.startsWith('tag:')) return { tag: view.slice(4) }
-  switch (view) {
-    case 'favorites':
-      return { favoritesOnly: true }
-    case 'recent':
-      return { recentOnly: true }
-    case 'video':
-      return { kind: 'video' }
-    case 'audio':
-      return { kind: 'audio' }
-    case 'images':
-      return { kind: 'image' }
-    case 'templates':
-      return { kind: 'template' }
-    case 'missing':
-      return { missingOnly: true }
-    default:
-      return {}
-  }
-}
-
-/** Shown while a new view or search loads; only after a moment, so quick loads don't flash. */
-function LoadingState(): React.JSX.Element {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setVisible(true), 150)
-    return () => clearTimeout(timer)
-  }, [])
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="flex flex-1 items-center justify-center gap-2 text-sm text-ink-3"
-    >
-      {visible && (
-        <>
-          <LoaderCircle
-            size={16}
-            strokeWidth={1.75}
-            className="animate-spin motion-reduce:animate-none"
-          />
-          Loading assets…
-        </>
-      )}
-    </div>
-  )
-}
-
-function useDebounced<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(timer)
-  }, [value, delay])
-  return debounced
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
-  )
-}
-
-/** Controls that handle Enter themselves. Asset tiles and rows are ours, so they don't count. */
-function isOtherControl(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  if (target.closest('[role=gridcell], [role=option], [role=listbox]')) return false
-  return (
-    target.isContentEditable ||
-    target.closest(
-      'button, a, [role=button], [role=link], input, textarea, select, [contenteditable]'
-    ) !== null
-  )
-}
-
-interface Selection {
-  asset: AssetRecord
-  /** Where the asset was when selected; checked against its ID before use, since results move. */
-  index: number
-}
-
-/** The selection's current position, or undefined if it isn't among the loaded pages. */
-function selectionIndex(selection: Selection, pages: AssetPages): number | undefined {
-  if (pages.itemAt(selection.index)?.id === selection.asset.id) return selection.index
-  return pages.indexOf(selection.asset.id)
-}
-
+/** The installer and manager window. The asset browser itself is the panel inside Premiere. */
 export default function App(): React.JSX.Element {
-  const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
-  const [roots, setRoots] = useState<RootRecord[] | null>(null)
-  const [counts, setCounts] = useState<LibraryCounts | null>(null)
-  const [tags, setTags] = useState<TagCount[]>([])
-  const [progress, setProgress] = useState<Record<number, ScanProgress>>({})
-  const [activeView, setActiveView] = useState<ViewId>('all')
-  const [text, setText] = useState('')
-  const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [sort, setSort] = useState<AssetSort>('added')
-  const [selection, setSelection] = useState<Selection | null>(null)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const searchRef = useRef<HTMLInputElement>(null)
-  const viewRef = useRef<AssetViewHandle>(null)
-  const favoriteToggle = useRef(new FavoriteToggle())
+  const installer = useInstaller()
+  const { status, error, busy, result } = installer
+  const [screen, setScreen] = useState<Screen>('install')
+  const [app, setApp] = useState<HostApp>('premiere')
+  const [choice, setChoice] = useState<Choice>('recommended')
+  const [manualVersion, setManualVersion] = useState<string | null>(null)
+  const [removal, setRemoval] = useState<RemovalTarget>(null)
+  const main = useRef<HTMLElement>(null)
 
-  const debouncedText = useDebounced(text, 150)
-  const query = useMemo<AssetQuery>(
-    () => ({ ...queryForView(activeView), sort, text: debouncedText || undefined }),
-    [activeView, sort, debouncedText]
+  const failed = result?.action === 'install' && !result.ok
+  const plan = useMemo(
+    () => planInstall(status, { app, choice, busy, failed }),
+    [status, app, choice, busy, failed]
   )
-  const pages = useAssetPages(query, refreshKey)
 
-  // A new view, search or sort drops the selection: its position belongs to the old results.
-  const [selectionQuery, setSelectionQuery] = useState(query)
-  if (selectionQuery !== query) {
-    setSelectionQuery(query)
-    setSelection(null)
+  // A new screen starts at the top.
+  useEffect(() => {
+    main.current?.scrollTo({ top: 0 })
+  }, [screen])
+
+  const changeChoice = (next: Choice): void => {
+    setChoice(next)
+    installer.clearResult()
   }
+  const reveal = (target: RevealTarget, index?: number): void => {
+    void window.assetLibrary.revealLocation(target, index)
+  }
+  const openLink = (link: ExternalLink): void => {
+    void window.assetLibrary.openLink(link)
+  }
+  const installed = plan.installed
+  // Adobe's installer removes a build by name, so every installed version of it goes.
+  const removalBuilds: PanelBuild[] =
+    removal?.kind === 'one'
+      ? [removal.panel.build]
+      : [...new Set(installed.map((panel) => panel.build))]
+  const removalPanels = installed.filter((panel) => removalBuilds.includes(panel.build))
 
-  const reloadLibrary = useCallback(() => {
-    void window.assetLibrary.listRoots().then(setRoots)
-    void window.assetLibrary.getCounts().then(setCounts)
-    void window.assetLibrary.listTags().then(setTags)
-  }, [])
-
-  useEffect(() => {
-    void window.assetLibrary.getAppInfo().then(setAppInfo)
-    reloadLibrary()
-    return window.assetLibrary.onLibraryEvent((event) => {
-      if (event.type === 'scan-progress') {
-        setProgress((current) => ({ ...current, [event.progress.rootId]: event.progress }))
-        if (event.progress.state !== 'scanning') reloadLibrary()
-      } else {
-        setRefreshKey((key) => key + 1)
-        reloadLibrary()
-      }
-    })
-  }, [reloadLibrary])
-
-  // The details panel shows the record already in hand; library changes refetch it.
-  const refreshSelection = useEffectEvent(() => {
-    const id = selection?.asset.id
-    if (!id) return
-    void window.assetLibrary.getAsset(id).then((asset) => {
-      setSelection((current) => {
-        if (current?.asset.id !== id) return current
-        if (!asset) return null
-        // A favorite still being saved wins over what was read before it.
-        const favorite = favoriteToggle.current.current(id, asset.favorite)
-        return { ...current, asset: { ...asset, favorite } }
-      })
-    })
-  })
-  useEffect(() => {
-    if (refreshKey > 0) refreshSelection()
-  }, [refreshKey])
-
-  const select = useCallback((asset: AssetRecord, index: number) => {
-    setSelection({ asset, index })
-  }, [])
-
-  const openAsset = useCallback((asset: AssetRecord) => {
-    void window.assetLibrary.revealAsset(asset.id)
-  }, [])
-
-  const addFolder = useCallback(async () => {
-    const root = await window.assetLibrary.addFolder()
-    if (root) {
-      reloadLibrary()
-      setActiveView('all')
-    }
-  }, [reloadLibrary])
-
-  const removeRoot = useCallback(
-    async (root: RootRecord) => {
-      const confirmed = window.confirm(
-        `Remove “${root.label}” from Asset Library?\n\nYour files stay where they are; only the library entry, tags and favorites for this folder are removed.`
-      )
-      if (!confirmed) return
-      await window.assetLibrary.removeRoot(root.id)
-      if (activeView === `root:${root.id}`) setActiveView('all')
-      setSelection(null)
-      reloadLibrary()
-      setRefreshKey((key) => key + 1)
-    },
-    [activeView, reloadLibrary]
-  )
-
-  const changeView = useCallback((view: ViewId) => {
-    setActiveView(view)
-    setSelection(null)
-  }, [])
-
-  // Keyboard: Cmd/Ctrl+F search, arrows move, F favorite, Enter reveal, Esc closes details.
-  // An effect event always sees the latest state, so the listener is added only once.
-  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
-      event.preventDefault()
-      searchRef.current?.focus()
-      return
-    }
-    if (event.defaultPrevented || isTyping(event.target) || activeView === 'settings') return
-    const columns = viewRef.current?.columns ?? 1
-    const move = { ArrowRight: 1, ArrowDown: columns, ArrowLeft: -1, ArrowUp: -columns }[event.key]
-    if (move !== undefined && pages.total > 0) {
-      event.preventDefault()
-      const from = selection ? selectionIndex(selection, pages) : undefined
-      const next = from === undefined ? 0 : Math.min(pages.total - 1, Math.max(0, from + move))
-      const asset = pages.itemAt(next)
-      if (asset) {
-        setSelection({ asset, index: next })
-        viewRef.current?.scrollToIndex(next)
-      }
-      return
-    }
-    const current = selection?.asset
-    if (!current) return
-    if (event.key === 'Escape') setSelection(null)
-    if (event.key.toLowerCase() === 'f' && !event.metaKey && !event.ctrlKey) {
-      // From the latest press, not the record in hand (it's refetched only after saving).
-      const id = current.id
-      const favorite = favoriteToggle.current.next(id, current.favorite)
-      setSelection((s) => (s?.asset.id === id ? { ...s, asset: { ...s.asset, favorite } } : s))
-      void window.assetLibrary.setFavorite(id, favorite).finally(() => {
-        favoriteToggle.current.saved(id, favorite)
-        setRefreshKey((key) => key + 1)
-      })
-    }
-    if (event.key === 'Enter' && !isOtherControl(event.target)) {
-      // Stops a focused tile from also handling Enter as a click on itself.
-      event.preventDefault()
-      void window.assetLibrary.revealAsset(current.id)
-    }
-  })
-  useEffect(() => {
-    const listener = (event: KeyboardEvent): void => onKeyDown(event)
-    window.addEventListener('keydown', listener)
-    return () => window.removeEventListener('keydown', listener)
-  }, [])
-
-  const shownAsset = selection?.asset ?? null
-
-  const title = activeView.startsWith('root:')
-    ? (roots?.find((r) => `root:${r.id}` === activeView)?.label ?? 'Folder')
-    : activeView.startsWith('tag:')
-      ? `Tagged “${activeView.slice(4)}”`
-      : (VIEW_TITLES[activeView] ?? 'All assets')
-
-  const scanningAny = Object.values(progress).some((p) => p.state === 'scanning')
-  const showEmptyLibrary = roots !== null && roots.length === 0 && activeView !== 'settings'
-
-  let content: React.JSX.Element
-  if (activeView === 'settings') {
-    content = <SettingsView roots={roots ?? []} onRemoveRoot={(root) => void removeRoot(root)} />
-  } else if (showEmptyLibrary) {
-    content = <EmptyState onAddFolder={() => void addFolder()} />
-  } else if (pages.error) {
-    content = (
-      <div className="flex flex-1 items-center justify-center text-sm text-ink-2">
-        Couldn&apos;t load assets: {pages.error}
-      </div>
-    )
-  } else if (pages.loading) {
-    content = <LoadingState />
-  } else if (pages.total === 0) {
-    content = (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-        <SearchX size={28} strokeWidth={1.5} className="text-ink-3" />
-        <p className="text-sm text-ink">
-          {debouncedText
-            ? `Nothing matches “${debouncedText}”`
-            : scanningAny
-              ? 'Scanning your folders…'
-              : 'Nothing here yet'}
-        </p>
-        <p className="max-w-[340px] text-xs text-ink-3">
-          {debouncedText
-            ? 'Try a shorter word, part of a folder name, or a tag.'
-            : activeView === 'favorites'
-              ? 'Star assets you use often and they collect here.'
-              : activeView === 'missing'
-                ? 'Files that disappear from your folders show up here, with their tags kept.'
-                : 'Assets of this kind appear here once your folders are scanned.'}
-        </p>
-      </div>
-    )
-  } else {
-    const View = viewMode === 'grid' ? AssetGrid : AssetList
-    content = (
-      <View
-        ref={viewRef}
-        pages={pages}
-        selectedId={shownAsset?.id ?? null}
-        onSelect={select}
-        onOpen={openAsset}
-      />
-    )
+  const confirmRemoval = async (): Promise<void> => {
+    setRemoval(null)
+    for (const build of removalBuilds) await installer.remove(build)
   }
 
   return (
-    <div className="flex h-full">
-      <Sidebar
-        activeView={activeView}
-        onSelectView={changeView}
-        roots={roots ?? []}
-        counts={counts}
-        tags={tags}
-        onAddFolder={() => void addFolder()}
-        onRemoveRoot={(root) => void removeRoot(root)}
+    <div className="flex h-full flex-col">
+      <BrandHeader macOS={status?.platform === 'darwin'} onHelp={() => setScreen('help')} />
+      <div className="flex min-h-0 flex-1">
+        <SidebarNavigation current={screen} onChange={setScreen} />
+        <main
+          ref={main}
+          aria-label={SCREEN_TITLES[screen]}
+          className="min-w-0 flex-1 overflow-y-auto px-6 py-5"
+        >
+          <div className="mx-auto max-w-3xl">
+            {screen === 'install' && (
+              <InstallScreen
+                status={status}
+                error={error}
+                plan={plan}
+                app={app}
+                onApp={(next) => {
+                  setApp(next)
+                  installer.clearResult()
+                }}
+                choice={choice}
+                onChoice={changeChoice}
+                manualVersion={manualVersion}
+                onManualVersion={setManualVersion}
+                onRetry={() => void installer.refresh()}
+                onReveal={reveal}
+              />
+            )}
+            {screen === 'manage' && (
+              <ManageScreen
+                status={status}
+                error={error}
+                installed={installed}
+                busy={busy !== null}
+                onUpdate={(build) => void installer.install([build])}
+                onRemove={(panel) => setRemoval({ kind: 'one', panel })}
+                onUninstallApp={() => void window.assetLibrary.uninstallApp()}
+                onGoInstall={() => setScreen('install')}
+                onRetry={() => void installer.refresh()}
+                onReveal={reveal}
+              />
+            )}
+            {screen === 'about' && <AboutScreen status={status} onLink={openLink} />}
+            {screen === 'help' && <HelpScreen onLink={openLink} />}
+          </div>
+        </main>
+      </div>
+      <BottomActionBar
+        primary={plan.primary}
+        onPrimary={() => void installer.install(plan.targets)}
+        onClose={() => window.close()}
+        message={result ? { ok: result.ok, text: result.message } : null}
+        secondary={
+          plan.canUninstall ? (
+            <button
+              type="button"
+              onClick={() => setRemoval({ kind: 'all' })}
+              className={buttonClass('quiet')}
+            >
+              Uninstall…
+            </button>
+          ) : null
+        }
       />
-      <main className="flex min-w-0 flex-1 flex-col">
-        <TopBar
-          ref={searchRef}
-          title={title}
-          query={text}
-          onQueryChange={setText}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          sort={sort}
-          onSortChange={setSort}
-          onRescan={() => void window.assetLibrary.rescan()}
-          isMac={appInfo?.platform === 'darwin'}
-        />
-        <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">{content}</div>
-          {shownAsset && activeView !== 'settings' && (
-            <DetailsPanel
-              asset={shownAsset}
-              root={roots?.find((r) => r.id === shownAsset.rootId)}
-              isMac={appInfo?.platform === 'darwin'}
-              onChanged={() => {
-                setRefreshKey((key) => key + 1)
-                reloadLibrary()
+      <ConfirmationDialog
+        open={removal !== null}
+        title={
+          removal?.kind === 'one'
+            ? `Uninstall the ${PANEL_BUILDS[removal.panel.build].label} panel?`
+            : 'Uninstall the Premiere Pro panel?'
+        }
+        confirmLabel="Uninstall"
+        onConfirm={() => void confirmRemoval()}
+        onCancel={() => setRemoval(null)}
+        extra={
+          removal?.kind === 'all' ? (
+            <button
+              type="button"
+              className={buttonClass('quiet')}
+              onClick={() => {
+                setRemoval(null)
+                void window.assetLibrary.uninstallApp()
               }}
-              onClose={() => setSelection(null)}
-            />
-          )}
-        </div>
-        <StatusBar
-          total={counts?.total ?? 0}
-          shown={pages.total}
-          folderCount={roots?.length ?? 0}
-          progress={Object.values(progress)}
-          version={appInfo?.version ?? null}
-        />
-      </main>
+            >
+              Uninstall the whole app…
+            </button>
+          ) : null
+        }
+      >
+        <p>This removes:</p>
+        <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
+          {removalPanels.map((panel) => (
+            <li key={`${panel.build}:${panel.version}`}>
+              {PANEL_BUILDS[panel.build].label} panel {panel.version}, used by Premiere Pro{' '}
+              {panel.premiere.join(', ')}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2">
+          Other Adobe plugins, your library and your own files stay as they are. Restart Premiere
+          Pro afterwards.
+        </p>
+      </ConfirmationDialog>
     </div>
   )
 }

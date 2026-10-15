@@ -8,15 +8,17 @@
 @theme {
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
 
-  --color-canvas: #121216;
-  --color-panel: #17171c;
-  --color-raised: #1e1e25;
-  --color-line: #26262f;
-  --color-line-strong: #34343f;
-  --color-ink: #eeedf3;
-  --color-ink-2: #a3a1b3;
-  --color-ink-3: #6e6c7e;
-  --color-danger: #f07178;
+  --color-canvas: #101014;
+  --color-panel: #17171d;
+  --color-raised: #1d1d25;
+  --color-line: #2a2a35;
+  --color-line-strong: #383845;
+  --color-ink: #f4f3f8;
+  --color-ink-2: #a5a3b5;
+  --color-ink-3: #74728a;
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
 
   --color-brand-200: var(--brand-200);
   --color-brand-300: var(--brand-300);
@@ -57,43 +59,18 @@
   }
 }
 
-/* Transparent assets sit on a checkerboard so overlays read as overlays. */
-.checkerboard {
-  background-color: #2a2a33;
-  background-image:
-    linear-gradient(45deg, #1f1f26 25%, transparent 25%),
-    linear-gradient(-45deg, #1f1f26 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #1f1f26 75%),
-    linear-gradient(-45deg, transparent 75%, #1f1f26 75%);
-  background-size: 16px 16px;
-  background-position:
-    0 0,
-    0 8px,
-    8px -8px,
-    -8px 0;
-}
-
-/* The one orchestrated moment: shelf bars rise once on the first-run screen. */
-.shelf-bar {
-  transform-box: fill-box;
-  transform-origin: bottom;
-  animation: shelf-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-@keyframes shelf-rise {
-  from {
-    transform: scaleY(0.15);
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .shelf-bar {
-    animation: none;
-  }
-}
-
 @utility drag-region {
   -webkit-app-region: drag;
 }
 @utility no-drag {
   -webkit-app-region: no-drag;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

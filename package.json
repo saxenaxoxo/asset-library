@@ -1,7 +1,7 @@
 {
   "name": "asset-library-workspace",
   "private": true,
-  "description": "Asset Library by Saxenas Creation: desktop app, Premiere Pro panel and shared branding.",
+  "description": "Asset Library by Goated Panels: Goated Panels Hub (desktop app), Premiere Pro panel and shared branding.",
   "license": "UNLICENSED",
   "scripts": {
     "dev": "pnpm --filter asset-library dev",

@@ -1,5 +1,6 @@
 import { readFileSync } from 'fs'
 import { Menu, nativeImage, Tray, type NativeImage } from 'electron'
+import { brandIdentity } from '@brand/brand-identity'
 import macIcon from '../../../resources/trayTemplate.png?asset'
 import macIcon2x from '../../../resources/trayTemplate@2x.png?asset'
 import winIcon from '../../../resources/tray.png?asset'
@@ -12,6 +13,8 @@ export interface TrayActions {
   installPanel(): void
   /** Opens the newer release's page in the browser. */
   openUpdate(url: string): void
+  /** Asks to confirm, then removes the app, its panel and (if chosen) its data. */
+  uninstall(): void
   quit(): void
 }
 
@@ -76,7 +79,7 @@ export class EngineTray {
             ]
           : []),
         { type: 'separator' },
-        { label: `Open ${this.productName} window`, click: () => this.actions.openWindow() },
+        { label: `Open ${brandIdentity.hubName}`, click: () => this.actions.openWindow() },
         {
           label: 'Install Premiere Pro panel',
           enabled: state.canInstallPanel,
@@ -89,6 +92,7 @@ export class EngineTray {
           click: (item) => this.actions.setStartAtLogin(item.checked)
         },
         { type: 'separator' },
+        { label: `Uninstall ${this.productName}…`, click: () => this.actions.uninstall() },
         { label: `Quit ${this.productName}`, click: () => this.actions.quit() }
       ])
     )

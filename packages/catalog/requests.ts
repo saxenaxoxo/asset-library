@@ -44,6 +44,8 @@ export type PanelRequest =
   /** Play an asset's sound through the computer (panels can't play media). */
   | { type: 'play-audio'; id: string }
   | { type: 'stop-audio' }
+  /** Uninstall the app from this computer. The engine asks the editor to confirm on screen. */
+  | { type: 'uninstall' }
 
 export interface RequestResult {
   /** The request file's name without ".json". */
@@ -147,6 +149,8 @@ export function parseRequest(text: string): PanelRequest | null {
       return isId(r['id']) ? { type: 'play-audio', id: r['id'] } : null
     case 'stop-audio':
       return { type: 'stop-audio' }
+    case 'uninstall':
+      return { type: 'uninstall' }
     default:
       return null
   }

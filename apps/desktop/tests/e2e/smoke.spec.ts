@@ -21,18 +21,56 @@ function launch(userDataDir: string, ...extra: string[]): Promise<ElectronApplic
   )
 }
 
-test('launches into the branded empty library', async () => {
+test('opens the installer: install, manage, about and help', async () => {
   // A throwaway profile: never touches the real library, and runs beside an open copy of the app.
   const userDataDir = mkdtempSync(join(tmpdir(), 'asset-library-e2e-'))
   const executablePath = process.env['E2E_EXECUTABLE']
   const app = await launch(userDataDir)
   const page = await app.firstWindow()
 
-  await expect(page).toHaveTitle('Asset Library')
-  await expect(page.getByRole('heading', { name: 'Bring your assets together' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Add folder' }).first()).toBeVisible()
+  await expect(page).toHaveTitle('Goated Panels Hub')
+  await expect(page.getByRole('img', { name: 'Goated Panels' }).first()).toBeVisible()
+  await expect(page.getByText('Goated Panels Hub').first()).toBeVisible()
   await expect(page.getByRole('img', { name: 'Asset Library' }).first()).toBeVisible()
-  await expect(page.getByText('Version 0.1.0')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Asset Library for Premiere Pro' })).toBeVisible()
+  // Both methods are offered as radio cards; what's installed is read, never assumed.
+  const methods = page.getByRole('radiogroup', { name: 'Installation method' })
+  await expect(methods.getByRole('radio')).toHaveCount(2)
+  await expect(methods.getByText('Modern')).toBeVisible()
+  await expect(methods.getByText('Legacy')).toBeVisible()
+  await expect(page.getByText(/Not installed|Installed:|Couldn't check/)).toBeVisible({
+    timeout: 20_000
+  })
+  const primary = page.locator('footer').getByRole('button').last()
+  await expect(primary).toBeVisible()
+  if (!executablePath) {
+    // A development build carries no panel, so it can't install one, and says why.
+    await expect(primary).toBeDisabled()
+    await expect(page.getByRole('status')).toContainText('development copy')
+  }
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: 'test-results/installer.png' })
+
+  // After Effects: honestly not available yet.
+  await page.getByText('After Effects', { exact: true }).click()
+  await expect(page.getByText('No After Effects panel yet')).toBeVisible()
+  await expect(
+    page.locator('footer').getByRole('button', { name: 'Not available yet' })
+  ).toBeDisabled()
+
+  await page.getByRole('button', { name: 'Manage' }).click()
+  await expect(page.getByRole('heading', { name: 'Installed panels' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Uninstall Goated Panels Hub…' })).toBeVisible()
+  await page.getByRole('button', { name: 'About' }).click()
+  await expect(page.getByText('App version')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Goated Panels Hub' })).toBeVisible()
+  await expect(page.getByText('Asset Library by goatedpanels.in')).toBeVisible()
+  await expect(page.getByText('0.1.0').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: /Source code/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Help', exact: true }).first().click()
+  await expect(page.getByRole('heading', { name: 'Install in four steps' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/installer-help.png' })
+  await page.getByRole('button', { name: 'Install' }).click()
 
   // The renderer must not be able to reach Node, and only the typed bridge is exposed.
   expect(await page.evaluate(() => typeof (globalThis as { require?: unknown }).require)).toBe(
@@ -43,25 +81,13 @@ test('launches into the branded empty library', async () => {
       Object.keys((globalThis as unknown as { assetLibrary: object }).assetLibrary).sort()
     )
   ).toEqual([
-    'addFolder',
-    'addTag',
-    'getAppInfo',
-    'getAsset',
-    'getCounts',
     'getDiagnostics',
-    'getHosts',
-    'listRoots',
-    'listTags',
-    'onLibraryEvent',
-    'pickDragTestFiles',
-    'queryAssets',
-    'removeRoot',
-    'removeTag',
-    'rescan',
-    'revealAsset',
-    'sendToAfterEffects',
-    'setFavorite',
-    'startDrag'
+    'getInstallerStatus',
+    'installPanel',
+    'openLink',
+    'removePanel',
+    'revealLocation',
+    'uninstallApp'
   ])
 
   // The native SQLite module loads inside Electron, with full-text search.
@@ -83,12 +109,7 @@ test('launches into the branded empty library', async () => {
   // Packaged builds must ship a working FFprobe (run in the utility process).
   if (executablePath) expect(diagnostics.ffprobeVersion).toMatch(/^\d+\.\d+/)
 
-  // Drag-out needs its icon on disk: macOS refuses to start a drag with an empty image.
-  const dragIconEmpty = await app.evaluate(({ app: electronApp, nativeImage }) =>
-    nativeImage.createFromPath(`${electronApp.getAppPath()}/resources/drag-icon.png`).isEmpty()
-  )
-  expect(dragIconEmpty).toBe(false)
-  // So do the menu-bar / notification-area icons, at both sizes.
+  // The menu-bar / notification-area icons are loaded from disk at runtime, at both sizes.
   const trayIconSizes = await app.evaluate(({ app: electronApp, nativeImage }) =>
     ['trayTemplate.png', 'trayTemplate@2x.png', 'tray.png', 'tray@2x.png'].map(
       (name) =>
@@ -102,9 +123,10 @@ test('launches into the branded empty library', async () => {
   const menu = await app.evaluate(
     ({ Menu }) => Menu.getApplicationMenu()?.items.map((item) => item.label) ?? null
   )
-  expect(menu).toEqual(process.platform === 'darwin' ? ['Asset Library', 'Edit', 'Window'] : null)
+  expect(menu).toEqual(
+    process.platform === 'darwin' ? ['Goated Panels Hub', 'Edit', 'Window'] : null
+  )
 
-  await page.waitForTimeout(800) // let the one-time shelf animation settle
   await page.screenshot({ path: 'test-results/shell.png' })
 
   // Closing the window keeps the engine running for the Premiere panel.

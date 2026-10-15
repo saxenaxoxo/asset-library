@@ -1,22 +1,24 @@
 import { BrowserWindow } from 'electron'
 import { join } from 'path'
+import { brandIdentity } from '@brand/brand-identity'
 
 export const RENDERER_INDEX = join(__dirname, '../renderer/index.html')
-const WINDOW_BACKGROUND = '#0E0E11'
+const WINDOW_BACKGROUND = '#101014'
 
 let current: BrowserWindow | null = null
 
-/** The library window, if it's open. The engine has other (hidden) windows, so don't guess. */
+/** The installer window, if it's open. The engine has other (hidden) windows, so don't guess. */
 export function mainWindow(): BrowserWindow | null {
   return current && !current.isDestroyed() ? current : null
 }
 
 export function createMainWindow(devServerUrl: string | undefined): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1360,
-    height: 860,
-    minWidth: 960,
-    minHeight: 600,
+    title: brandIdentity.hubName,
+    width: 940,
+    height: 680,
+    minWidth: 720,
+    minHeight: 540,
     show: false,
     backgroundColor: WINDOW_BACKGROUND,
     autoHideMenuBar: true,

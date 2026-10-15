@@ -9,6 +9,7 @@ import {
   installSucceeded,
   PanelInstaller,
   panelNeedsInstall,
+  premiereInventory,
   upiaArgs,
   upiaPath,
   upiaProblem,
@@ -202,7 +203,104 @@ function installer(
   return { installer: new PanelInstaller(deps), calls, installed, installedCep }
 }
 
+describe('premiereInventory', () => {
+  it('reports each Premiere Pro version with the panels it sees', () => {
+    const output = [
+      '1 extension installed for Adobe Media Encoder (ver 26.5.2)',
+      ' Enabled    Asset Library                                               9.9.9',
+      '2 extensions installed for Premiere Pro (ver 26.5.2)',
+      ' Enabled    Asset Library CEP                                           0.4.1',
+      ' Enabled    Magnific                                                    0.2.0',
+      '1 extension installed for Premiere Pro (ver 27.0.0)',
+      ' Enabled    Asset Library                                               0.4.1',
+      '0 extension installed for Others'
+    ].join('\n')
+    expect(premiereInventory(output, 'Asset Library')).toEqual([
+      { version: '26.5.2', cep: ['0.4.1'], uxp: [] },
+      { version: '27.0.0', cep: [], uxp: ['0.4.1'] }
+    ])
+    expect(premiereInventory('', 'Asset Library')).toEqual([])
+  })
+})
+
 describe('PanelInstaller', () => {
+  it('installs exactly the build the editor chose', async () => {
+    const both = ['Asset-Library-Premiere-0.4.0.ccx', 'Asset-Library-Premiere-CEP-0.4.0.zxp']
+    const {
+      installer: i,
+      installed,
+      installedCep
+    } = installer({
+      bundled: both,
+      premiere: ['26.5.2']
+    })
+    // Premiere 26 would get CEP; the editor picked UXP.
+    expect(await i.install(['uxp'])).toMatchObject({ ok: true, version: '0.4.0' })
+    expect(installed).toEqual(['0.4.0'])
+    expect(installedCep).toEqual([])
+  })
+
+  it('removes one build and leaves the other', async () => {
+    const {
+      installer: i,
+      installed,
+      installedCep
+    } = installer({
+      installed: ['0.4.0'],
+      installedCep: ['0.4.0']
+    })
+    expect((await i.removeAll(['cep'])).ok).toBe(true)
+    expect(installedCep).toEqual([])
+    expect(installed).toEqual(['0.4.0'])
+  })
+
+  it('removes every copy of both builds when the app is uninstalled', async () => {
+    const {
+      installer: i,
+      calls,
+      installed,
+      installedCep
+    } = installer({
+      installed: ['0.3.24'],
+      installedCep: ['0.4.0', '0.3.0']
+    })
+    expect(await i.removeAll()).toEqual({ ok: true, message: 'Removed the Premiere Pro panel.' })
+    expect(calls).toEqual([
+      ['--list', 'all'],
+      ['--remove', 'Asset Library CEP'],
+      ['--list', 'all'],
+      ['--remove', 'Asset Library CEP'],
+      ['--list', 'all'],
+      ['--list', 'all'],
+      ['--remove', 'Asset Library'],
+      ['--list', 'all']
+    ])
+    expect([...installed, ...installedCep]).toEqual([])
+  })
+
+  it('keeps removing while the same version is still listed (copies show once)', async () => {
+    const { installer: i, installed } = installer({ installed: ['0.3.0', '0.3.0', '0.3.0'] })
+    expect((await i.removeAll()).ok).toBe(true)
+    expect(installed).toEqual([])
+  })
+
+  it('says how to finish by hand when a copy stays installed', async () => {
+    const { installer: i } = installer({ installed: Array(7).fill('0.3.0') })
+    const result = await i.removeAll()
+    expect(result.ok).toBe(false)
+    expect(result.message).toMatch(/didn't remove the Premiere Pro panel 0\.3\.0\./)
+    expect(result.message).toMatch(/Creative Cloud app/)
+  })
+
+  it("has nothing to remove without Adobe's installer", async () => {
+    const { installer: i, calls } = installer({ agent: false })
+    expect(await i.removeAll()).toEqual({
+      ok: true,
+      message: 'No Premiere Pro panel was installed.'
+    })
+    expect(calls).toEqual([])
+  })
+
   it('removes every old copy before installing the bundled panel', async () => {
     const { installer: i, calls, installed } = installer({ installed: ['0.2.1', '0.3.0'] })
     const result = await i.install()
@@ -213,8 +311,11 @@ describe('PanelInstaller', () => {
     })
     expect(calls).toEqual([
       ['--list', 'all'],
+      ['--list', 'all'],
       ['--remove', 'Asset Library'],
+      ['--list', 'all'],
       ['--remove', 'Asset Library'],
+      ['--list', 'all'],
       [
         '--install',
         nodePath.join('/App/resources', 'premiere-panel', 'Asset-Library-Premiere-0.3.14.ccx')
@@ -225,11 +326,11 @@ describe('PanelInstaller', () => {
   })
 
   it('uses Windows flags and paths there', async () => {
-    const { installer: i, calls } = installer({ platform: 'win32' })
+    const { installer: i, calls } = installer({ platform: 'win32', installed: ['0.3.0'] })
     expect((await i.install()).ok).toBe(true)
-    expect(calls[1]).toEqual(['/remove', 'Asset Library'])
-    expect(calls[2]?.[0]).toBe('/install')
-    expect(calls[2]?.[1]).toMatch(/premiere-panel[\\/]Asset-Library-Premiere-0\.3\.14\.ccx$/)
+    expect(calls).toContainEqual(['/remove', 'Asset Library'])
+    const install = calls.find(([flag]) => flag === '/install')
+    expect(install?.[1]).toMatch(/premiere-panel[\\/]Asset-Library-Premiere-0\.3\.14\.ccx$/)
   })
 
   it("explains when Adobe's installer or the bundled panel isn't there", async () => {
@@ -304,24 +405,28 @@ describe('PanelInstaller', () => {
       premiere: ['26.5.2', '27.0.0']
     })
     expect(await i.install()).toMatchObject({ ok: true, version: '0.4.0' })
-    expect(calls.filter(([flag]) => flag === '--remove')).toEqual([
-      ['--remove', 'Asset Library CEP'],
-      ['--remove', 'Asset Library']
-    ])
+    // Only what's installed is removed: the old UXP copy, no CEP one.
+    expect(calls.filter(([flag]) => flag === '--remove')).toEqual([['--remove', 'Asset Library']])
     expect(calls.filter(([flag]) => flag === '--install').map(([, file]) => file)).toEqual([
       nodePath.join('/App/resources', 'premiere-panel', 'Asset-Library-Premiere-CEP-0.4.0.zxp'),
       nodePath.join('/App/resources', 'premiere-panel', 'Asset-Library-Premiere-0.4.0.ccx')
     ])
     expect(installed).toEqual(['0.4.0'])
     expect(installedCep).toEqual(['0.4.0'])
-    // A build whose CEP panel is missing from Premiere installs by itself, too.
+    // A build the editor never installed isn't added at launch: that's their choice to make
+    // in the installer window. Only installed builds are kept up to date.
     const partial = installer({
       bundled: both,
       installed: ['0.4.0'],
       premiere: ['26.5.2', '27.0.0']
     })
-    expect(await partial.installer.installIfNeeded(null, record)).toMatchObject({ ok: true })
+    expect(await partial.installer.installIfNeeded(null, record)).toBeNull()
     expect(record).toHaveBeenLastCalledWith('cep:0.4.0 uxp:0.4.0')
+    expect(partial.calls.filter(([flag]) => flag === '--install')).toEqual([])
+    const outdated = installer({ bundled: both, installed: ['0.3.24'], premiere: ['27.0.0'] })
+    expect(await outdated.installer.installIfNeeded(null, record)).toMatchObject({ ok: true })
+    expect(outdated.installed).toEqual(['0.4.0'])
+    expect(outdated.installedCep).toEqual([])
   })
 
   it('runs one install at a time', async () => {

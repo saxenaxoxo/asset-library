@@ -3,6 +3,7 @@
 // module in src/host-cep; the build picks one.
 import type { CatalogAsset } from '@catalog/types'
 import { ENGINE_START_URL } from '@catalog/requests'
+import { brandIdentity } from '@brand/brand-identity'
 import { dragContentType, DRAG_MIN_MAJOR, fileUri, hostMajor } from '../paths'
 
 /** UXP's own module, loaded on first use (unit tests load this file outside the host). */
@@ -81,7 +82,7 @@ export async function startEngine(): Promise<boolean> {
   try {
     const shell = uxp().shell
     if (!shell) return false
-    await shell.openExternal(ENGINE_START_URL, 'Start the Asset Library engine')
+    await shell.openExternal(ENGINE_START_URL, `Start ${brandIdentity.hubName}`)
     return true
   } catch {
     return false

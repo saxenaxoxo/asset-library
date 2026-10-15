@@ -1,6 +1,9 @@
 // Signs the CEP build into a .zxp that Premiere accepts without developer flags, using Adobe's
 // ZXPSignCmd (not bundled: put it at tools/ZXPSignCmd or point ZXPSIGNCMD at it). A self-signed
-// certificate is created once at tools/asset-library-cep.p12; the password comes from
+// certificate is created once at tools/goated-panels-cep.p12 (organisation: Goated Panels, decision
+// I3); the older tools/asset-library-cep.p12 (Saxenas Creation) is no longer used but left in place.
+// The Goated Panels Hub removes installed copies before installing, so the new signer doesn't
+// block updates. The password comes from
 // ZXP_CERT_PASSWORD (default: a local development password, fine for a self-signed certificate).
 //
 //   node scripts/sign-cep.mjs            → release/Asset-Library-Premiere-CEP-<version>.zxp
@@ -13,7 +16,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const dist = join(root, 'dist-cep')
 const tools = join(root, 'tools')
 const signer = process.env.ZXPSIGNCMD ?? join(tools, 'ZXPSignCmd')
-const certificate = join(tools, 'asset-library-cep.p12')
+const certificate = join(tools, 'goated-panels-cep.p12')
 const password = process.env.ZXP_CERT_PASSWORD ?? 'asset-library-dev'
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 
@@ -46,7 +49,7 @@ if (
 ) {
   execFileSync(
     signer,
-    ['-selfSignedCert', 'IN', 'Delhi', 'Saxenas Creation', 'Asset Library', password, certificate],
+    ['-selfSignedCert', 'IN', 'Delhi', 'Goated Panels', 'Asset Library', password, certificate],
     { stdio: 'inherit' }
   )
 }

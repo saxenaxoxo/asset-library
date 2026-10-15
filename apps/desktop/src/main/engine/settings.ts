@@ -107,10 +107,17 @@ export class SettingsStore {
    * Call once at start-up. The first time, turns "start at login" on (the default) and records
    * it, so a later "off" from the user sticks. After that, follows what the OS says, in case the
    * user switched it off in System Settings or Task Manager.
+   *
+   * `reapplyLoginItem`: the app was just renamed (its data folder moved), so the OS entry still
+   * names the old app. The remembered choice is written again for the renamed app instead.
    */
-  init(): void {
+  init({ reapplyLoginItem = false }: { reapplyLoginItem?: boolean } = {}): void {
     if (this.stored.startAtLogin === undefined) {
       this.setStartAtLogin(true)
+      return
+    }
+    if (reapplyLoginItem) {
+      this.setStartAtLogin(this.stored.startAtLogin)
       return
     }
     const actual = this.loginItem.get()

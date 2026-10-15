@@ -5,22 +5,22 @@ sequence; nothing here changes your files, but drops and inserts do change the o
 Record ✅ / ❌ (with what happened) next to each line, and copy results into `drag-out.md` in this folder
 and the "What the panel can and can't do" section of `docs/premiere-panel.md`.
 
-## 1. Desktop app (10 min)
+## 1. Library, from the Premiere Pro panel (10 min)
 
-- [ ] `pnpm dev` (or install the `.dmg`). Add a real assets folder (ideally on an external drive).
+The desktop app's window is now only the Goated Panels Hub installer; folders, search, tags and
+favorites live in the panel (install it first, section 3).
+
+- [ ] Install the `.dmg` (Goated Panels Hub). In the panel, add a real assets folder (ideally on an external drive).
 - [ ] Scanning finishes; thumbnails appear; hovering a video scrubs through it.
-- [ ] A ProRes 4444 overlay shows **Alpha** and plays in the details panel.
+- [ ] A ProRes 4444 overlay shows **Alpha** and plays in the panel's preview.
 - [ ] Search, type filters, favorites, tags work; favorites survive quitting and reopening.
 - [ ] Unplug the drive → its assets show **Drive offline** (not deleted). Plug back in → **Rescan** → normal again.
 - [ ] Rename a file in Finder → Rescan → it keeps its favorite and tags.
 
-## 2. Drag from the desktop app into Premiere Pro 26.5 and After Effects 26.5 (5 min)
+## 2. Drag from the desktop app — removed
 
-- [ ] Drag a video, a ProRes overlay, a WAV and a PNG into Premiere's **Project panel**.
-- [ ] Drag each onto the **timeline** (with a sequence open).
-- [ ] The same into After Effects (Project panel and a comp).
-- [ ] Select several and drag them at once (Settings → Drag-out test → Drag all).
-- [ ] Drag from the **installed** app too (not only `pnpm dev`): the drag icon appears and the drop works.
+The desktop asset browser, its drag-out and the drag-out test are gone (decision H6). Dragging
+onto the timeline is done from the panel (section 3).
 
 ## 3. Premiere Pro panel (15 min) — see `docs/premiere-panel.md` to install
 
@@ -37,35 +37,55 @@ and the "What the panel can and can't do" section of `docs/premiere-panel.md`.
 - [ ] A ProRes 4444 overlay keeps its transparency on the timeline.
 - [ ] A `.mogrt` (if you have one) is placed at the playhead.
 - [ ] Adding while no sequence is open shows "Open a sequence, then try again."
-- [ ] Add a folder in the desktop app → the panel updates within a few seconds.
+- [ ] Add a folder from the panel → it appears and fills in within a few seconds.
 - [ ] The panel's icon shows in Premiere's Window → UXP Plugins menu and in the panel tab.
 - [ ] A file with `#` or `%` in its name (e.g. `Glitch #2.mov`) adds correctly.
 
-## 4. After Effects 26.5 (10 min) — from the desktop app's details panel
+## 4. After Effects — removed
 
-- [ ] With After Effects closed, **Send to After Effects** says to open it first (it must not launch AE).
-- [ ] With a project open: the first time, macOS asks to let Asset Library control After Effects → allow.
-- [ ] **Send to After Effects** imports the original into the project.
-- [ ] With "Also add to the active comp" ticked: a layer is added at the comp's current time.
-- [ ] One **Cmd+Z** undoes it.
-- [ ] A ProRes 4444 overlay keeps its transparency.
-- [ ] An `.ffx` preset applies to the selected layers ("Apply to selected layers in After Effects").
-- [ ] An `.aep` imports as a project.
-- [ ] A file with `%` in its name (e.g. `50% Grain.mov`) imports correctly.
+Send to After Effects lived in the old desktop browser and is gone with it. There's no After
+Effects panel yet; the Hub's Install screen says so.
 
 ## 5. Installers (5 min)
 
-- [ ] Open `Asset-Library-<v>-arm64.dmg`, drag to Applications, open. macOS blocks it the first time →
+- [ ] Open `Goated-Panels-Hub-<v>-arm64.dmg`, drag to Applications, open. macOS blocks it the first time →
       **System Settings → Privacy & Security → Open Anyway** works.
-- [ ] Double-click the panel `.ccx` → Creative Cloud installs it → it appears in Premiere.
+- [ ] In the Hub, **Install** puts the panel into Premiere; it appears in Premiere as **Asset Library**.
 
 ## 6. Windows (only if you have a Windows PC; 15 min)
 
-Get `Asset-Library-<v>-setup.exe` from the latest **Build** run on GitHub (Actions → Build → Artifacts → `asset-library-windows`).
+Get `Goated-Panels-Hub-<v>-setup.exe` from the latest **Build** run on GitHub (Actions → Build → Artifacts → `asset-library-windows`).
 
 - [ ] Run the installer. On SmartScreen's "Windows protected your PC" click **More info → Run anyway**. Desktop and Start menu shortcuts appear.
 - [ ] Add a folder (try one on an external drive and, if you use one, a network share like `\\NAS\Assets`). Thumbnails, hover-scrub and previews appear.
-- [ ] Drag a clip from the app into Premiere's timeline and into After Effects.
-- [ ] Install the panel `.ccx` and repeat the panel checks from section 3; the panel finds the library on its own.
-- [ ] **Send to After Effects** works with After Effects open, and asks you to open it when it's closed.
+- [ ] Install the panel from the Hub and repeat the panel checks from section 3; the panel finds the library on its own.
 - [ ] Uninstall from Settings → Apps: the app goes, and your asset files are untouched.
+
+## 7. Upgrading from Asset Library to Goated Panels Hub (decision I2; 20 min per computer)
+
+Start from a computer with the **old** Asset Library app installed, a library with favorites and
+tags, the panel installed and start-at-login on. None of this has been tried on a real computer yet.
+
+macOS:
+
+- [ ] With the old app running, open Goated Panels Hub: it asks the old one to quit (or says to quit it), then opens with your library, favorites and tags.
+- [ ] `~/Library/Application Support/Goated Panels Hub` holds the library; `…/Asset Library` is now a link to it.
+- [ ] The old `Asset Library.app` is in the Trash (not deleted); Goated Panels Hub stays in Applications.
+- [ ] The panel installed **before** the upgrade still shows the library (through the link), before and after restarting Premiere.
+- [ ] After a restart, Goated Panels Hub (not the old app) starts at login.
+- [ ] Clicking **Start** in the panel with the Hub quit opens Goated Panels Hub (`assetlibrary://`).
+
+Windows:
+
+- [ ] Run `Goated-Panels-Hub-<v>-setup.exe` over the old install: no "Asset Library" left in the Start menu, desktop shortcuts or Settings → Apps; one "Goated Panels Hub" entry.
+- [ ] It installs to `…\Programs\Goated Panels Hub`; the old `…\Programs\Asset Library` folder is gone.
+- [ ] First launch: library, favorites and tags are there; `%APPDATA%\Asset Library` is a junction to `%APPDATA%\Goated Panels Hub`.
+- [ ] With the old app running during the first launch, it's closed (or you're told to quit it) and nothing is lost.
+- [ ] The panel installed before the upgrade still shows the library.
+- [ ] After a restart, Goated Panels Hub starts at login (in the background).
+- [ ] The panel's **Start** opens Goated Panels Hub.
+- [ ] Uninstall from Settings → Apps, choosing to keep the library: the app and panel go, the library stays. Reinstall: it's back.
+
+Move failures (either computer; use a copy of the library):
+
+- [ ] With a file in the old data folder held open by another program (Windows), the Hub still opens on the old folder and moves it on a later launch.

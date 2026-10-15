@@ -47,11 +47,32 @@ export interface Catalog {
 /** Frames per hover-scrub sprite strip. */
 export const SPRITE_FRAMES = 10
 
-/** Where the desktop app writes the catalog, relative to the user's home folder. */
-export function catalogPath(platform: 'darwin' | 'win32', home: string): string {
-  return platform === 'win32'
-    ? `${home}\\AppData\\Roaming\\Asset Library\\catalog\\catalog.json`
-    : `${home}/Library/Application Support/Asset Library/catalog/catalog.json`
+/**
+ * The desktop app's data folder names, newest first. The app was renamed from Asset Library to
+ * Goated Panels Hub and moves its data folder on first launch (decision I2); until it has, the
+ * catalog is still under the old name. The first name matches `productName` in
+ * apps/desktop/electron-builder.yml.
+ */
+export const ENGINE_DATA_FOLDERS = ['Goated Panels Hub', 'Asset Library'] as const
+
+/** Where the desktop app may write the catalog, relative to the user's home folder, newest first. */
+export function catalogPaths(platform: 'darwin' | 'win32', home: string): string[] {
+  return ENGINE_DATA_FOLDERS.map((folder) =>
+    platform === 'win32'
+      ? `${home}\\AppData\\Roaming\\${folder}\\catalog\\catalog.json`
+      : `${home}/Library/Application Support/${folder}/catalog/catalog.json`
+  )
+}
+
+/** The first place that has a catalog, or the newest place when none has one yet. */
+export async function findCatalog(
+  candidates: string[],
+  missing: (path: string) => Promise<boolean>
+): Promise<string | null> {
+  for (const path of candidates) {
+    if (!(await missing(path))) return path
+  }
+  return candidates[0] ?? null
 }
 
 /** Parses and checks a catalog file. Throws a readable error for unknown or broken files. */

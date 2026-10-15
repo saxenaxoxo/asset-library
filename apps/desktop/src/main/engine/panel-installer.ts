@@ -31,6 +31,40 @@ export function premiereVersions(listOutput: string): string[] {
   )
 }
 
+/** Each Premiere Pro version Adobe's installer lists, with the panel versions it sees there. */
+export interface PremiereInstall {
+  version: string
+  cep: string[]
+  uxp: string[]
+}
+
+/**
+ * Splits `--list all` output into its Premiere Pro sections ("N extensions installed for Premiere
+ * Pro (ver 26.5.2)" up to the next "installed for" heading), so several Premiere versions on one
+ * computer are reported separately.
+ */
+export function premiereInventory(listOutput: string, panelName: string): PremiereInstall[] {
+  const sections: { version: string; lines: string[] }[] = []
+  let current: { version: string; lines: string[] } | null = null
+  for (const line of listOutput.split(/\r?\n/)) {
+    if (/\binstalled for\b/i.test(line)) {
+      const version = /installed for Premiere Pro \(ver (\d+(?:\.\d+)*)\)/.exec(line)?.[1]
+      current = version ? { version, lines: [] } : null
+      if (current) sections.push(current)
+      continue
+    }
+    current?.lines.push(line)
+  }
+  return sections.map(({ version, lines }) => {
+    const text = lines.join('\n')
+    return {
+      version,
+      cep: installedPanelVersions(text, panelNameFor('cep', panelName)),
+      uxp: installedPanelVersions(text, panelNameFor('uxp', panelName))
+    }
+  })
+}
+
 /** Which panel builds the installed Premiere versions need: CEP below 27, UXP from 27. */
 export function wantedKinds(versions: readonly string[]): Set<PanelKind> {
   const kinds = new Set<PanelKind>()
@@ -235,15 +269,29 @@ export class PanelInstaller {
     }
   }
 
-  /** Removes any installed copies, then installs the bundled panel. Never throws. */
-  install(): Promise<PanelInstallResult> {
-    this.running ??= this.installNow().finally(() => {
+  /**
+   * What Adobe's installer reports for each Premiere Pro version on this computer, or null when
+   * the installer itself isn't there.
+   */
+  async inventory(): Promise<PremiereInstall[] | null> {
+    const agent = this.agent()
+    if (!agent) return null
+    const listed = await this.deps.run(agent, upiaArgs(this.deps.platform, { action: 'list' }))
+    return premiereInventory(listed.output, this.deps.panelName)
+  }
+
+  /**
+   * Removes any installed copies, then installs the bundled panel: the builds the installed
+   * Premiere versions need, or exactly `kinds` when the editor chose. Never throws.
+   */
+  install(kinds?: readonly PanelKind[]): Promise<PanelInstallResult> {
+    this.running ??= this.installNow(kinds).finally(() => {
       this.running = null
     })
     return this.running
   }
 
-  private async installNow(): Promise<PanelInstallResult> {
+  private async installNow(kinds?: readonly PanelKind[]): Promise<PanelInstallResult> {
     const bundles = this.bundled()
     if (bundles.length === 0) {
       return { ok: false, message: "This copy of the app doesn't include the Premiere Pro panel." }
@@ -267,7 +315,7 @@ export class PanelInstaller {
             "Premiere Pro isn't installed on this computer, so there's nowhere to put the panel."
         }
       }
-      const wanted = wantedKinds(premiere)
+      const wanted = kinds ? new Set(kinds) : wantedKinds(premiere)
       const needed = bundles.filter((bundle) => wanted.has(bundle.kind))
       if (needed.length === 0) {
         return {
@@ -278,13 +326,7 @@ export class PanelInstaller {
       for (const bundle of needed) {
         // Adobe's installer keeps old versions beside new ones (and Premiere may load an old
         // one), so every installed copy of this kind is removed first.
-        const removals = Math.min(Math.max(found?.[bundle.kind].length ?? 0, 1), MAX_REMOVALS)
-        for (let i = 0; i < removals; i++) {
-          await this.deps.run(
-            agent,
-            upiaArgs(platform, { action: 'remove', name: bundle.panelName })
-          )
-        }
+        await this.removeCopies(agent, bundle.kind)
         const installed = await this.deps.run(
           agent,
           upiaArgs(platform, { action: 'install', file: bundle.path })
@@ -318,10 +360,48 @@ export class PanelInstaller {
   }
 
   /**
-   * On the first launch of a new build: installs the bundled panel if Premiere doesn't already
-   * have exactly that version. Tries once per bundled version (`lastTried` / `recordTry`), so a
-   * failure doesn't repeat at every launch; the tray item can always run it again.
-   * Returns null when nothing was attempted.
+   * Removes every installed copy of one build. The list shows each version once even when
+   * several copies are installed, so this removes and lists again until none is left (or it
+   * stops making progress). Returns the versions still listed.
+   */
+  private async removeCopies(agent: string, kind: PanelKind): Promise<string[]> {
+    const name = panelNameFor(kind, this.deps.panelName)
+    let left = (await this.installedVersions())?.[kind] ?? []
+    for (let i = 0; i < MAX_REMOVALS && left.length > 0; i++) {
+      await this.deps.run(agent, upiaArgs(this.deps.platform, { action: 'remove', name }))
+      left = (await this.installedVersions())?.[kind] ?? []
+    }
+    return left
+  }
+
+  /** Removes one build (CEP or UXP), or both (for uninstalling the app). Never throws. */
+  async removeAll(kinds: readonly PanelKind[] = ['cep', 'uxp']): Promise<PanelInstallResult> {
+    const agent = this.agent()
+    // Without Adobe's installer there's nothing it could have installed.
+    if (!agent) return { ok: true, message: 'No Premiere Pro panel was installed.' }
+    try {
+      const left: string[] = []
+      for (const kind of kinds) left.push(...(await this.removeCopies(agent, kind)))
+      if (left.length > 0) {
+        return {
+          ok: false,
+          message: `Adobe's installer didn't remove the Premiere Pro panel ${left.join(', ')}. Remove it in the Creative Cloud app under Stock & Marketplace → Plugins.`
+        }
+      }
+      return { ok: true, message: 'Removed the Premiere Pro panel.' }
+    } catch (error) {
+      return {
+        ok: false,
+        message: `Couldn't remove the Premiere Pro panel: ${(error as Error).message}`
+      }
+    }
+  }
+
+  /**
+   * On the first launch of a new build: updates a panel the editor already installed if Premiere
+   * doesn't have exactly the bundled version. The first install is the editor's choice, made in
+   * the installer window. Tries once per bundled version (`lastTried` / `recordTry`), so a
+   * failure doesn't repeat at every launch. Returns null when nothing was attempted.
    */
   async installIfNeeded(
     lastTried: string | null,
@@ -335,9 +415,10 @@ export class PanelInstaller {
     // No Adobe installer, or no Premiere Pro yet: try again at a later launch.
     if (installed === null || installed.premiere.length === 0) return null
     recordTry(version)
-    const wanted = wantedKinds(installed.premiere)
-    const needed = bundles.filter((b) => wanted.has(b.kind))
-    if (!needed.some((b) => panelNeedsInstall(b.version, installed[b.kind]))) return null
-    return this.install()
+    const outdated = bundles.filter(
+      (b) => installed[b.kind].length > 0 && panelNeedsInstall(b.version, installed[b.kind])
+    )
+    if (outdated.length === 0) return null
+    return this.install(outdated.map((b) => b.kind))
   }
 }

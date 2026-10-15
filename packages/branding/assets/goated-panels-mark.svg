@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Goated Panels">
+  <!-- Goated Panels mark: a panel layout, one tile lit. Colour version, for dark backgrounds. -->
+  <defs>
+    <linearGradient id="gp-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E8E8EF"/></linearGradient>
+    <linearGradient id="gp-accent" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B07BFF"/><stop offset="1" stop-color="#4F38FF"/></linearGradient>
+    <linearGradient id="gp-mid" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#71717D"/><stop offset="1" stop-color="#4C4C57"/></linearGradient>
+    <linearGradient id="gp-dark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#40404A"/><stop offset="1" stop-color="#2C2C33"/></linearGradient>
+  </defs>
+  <rect x="5.0" y="10.15" width="54.0" height="11.07" rx="2.12" fill="url(#gp-top)"/>
+  <rect x="5.0" y="24.97" width="33.79" height="14.44" rx="2.12" fill="url(#gp-accent)"/>
+  <rect x="41.87" y="24.97" width="17.13" height="14.44" rx="2.12" fill="url(#gp-mid)"/>
+  <rect x="5.0" y="42.78" width="22.81" height="11.07" rx="2.12" fill="url(#gp-mid)"/>
+  <rect x="30.7" y="42.78" width="12.71" height="11.07" rx="2.12" fill="url(#gp-dark)"/>
+  <rect x="46.1" y="42.78" width="12.9" height="11.07" rx="2.12" fill="url(#gp-dark)"/>
+</svg>

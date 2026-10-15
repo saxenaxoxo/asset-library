@@ -1,6 +1,8 @@
+# appId stays as it was before the rename to Goated Panels Hub: Windows and macOS identify the
+# installed app by it, so an update replaces the old install instead of sitting beside it (decision I2).
 appId: com.saxenascreation.assetlibrary
-productName: Asset Library
-copyright: Copyright © 2026 Saxenas Creation
+productName: Goated Panels Hub
+copyright: Copyright © 2026 Goated Panels
 directories:
   buildResources: build
   output: dist
@@ -9,8 +11,6 @@ directories:
 files:
   - out/**
   - package.json
-  # The drag-out icon is loaded from disk at runtime; without it macOS refuses to start a drag.
-  - resources/drag-icon.png
   # Menu-bar / notification-area icons (1x and 2x), also loaded from disk at runtime.
   - resources/tray*.png
   - '!**/*.map'
@@ -34,7 +34,6 @@ mac:
   files:
     - out/**
     - package.json
-    - resources/drag-icon.png
     - resources/tray*.png
     - '!**/*.map'
     # Only ship the SQLite binaries this platform can load.
@@ -44,8 +43,6 @@ mac:
   notarize: false
   identity: '-'
   entitlements: build/entitlements.mac.plist
-  extendInfo:
-    NSAppleEventsUsageDescription: Asset Library sends assets you choose to After Effects.
   extraResources:
     - from: ../../THIRD_PARTY_NOTICES.md
       to: THIRD_PARTY_NOTICES.md
@@ -57,17 +54,16 @@ mac:
       to: premiere-panel
       filter: ['*.ccx', '*.zxp']
 dmg:
-  artifactName: Asset-Library-${version}-${arch}.${ext}
+  artifactName: Goated-Panels-Hub-${version}-${arch}.${ext}
 
 win:
   target:
     - target: nsis
       arch: [x64]
-  executableName: Asset Library
+  executableName: Goated Panels Hub
   files:
     - out/**
     - package.json
-    - resources/drag-icon.png
     - resources/tray*.png
     - '!**/*.map'
     - '!**/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*'
@@ -82,12 +78,15 @@ win:
       to: premiere-panel
       filter: ['*.ccx', '*.zxp']
 nsis:
-  artifactName: Asset-Library-${version}-setup.${ext}
+  artifactName: Goated-Panels-Hub-${version}-setup.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
-  shortcutName: Asset Library
-  uninstallDisplayName: Asset Library
+  shortcutName: Goated Panels Hub
+  uninstallDisplayName: Goated Panels Hub
   createDesktopShortcut: always
+  # Moves an install from before the rename to the new folder name; on uninstall removes the
+  # Premiere panel, login item and link, and offers to delete the library.
+  include: build/installer.nsh
 
 publish:
   provider: github

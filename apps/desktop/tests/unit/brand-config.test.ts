@@ -5,11 +5,23 @@ const HEX = /^#[0-9A-F]{6}$/i
 const STOPS: BrandRampStop[] = ['200', '300', '400', '500', '600', '700']
 
 describe('brand config', () => {
-  it('names the product and its parent brand', () => {
+  it('names the product, the hub and their parent brand', () => {
     expect(brand.productName).toBe('Asset Library')
-    expect(brand.parentBrand).toBe('Saxenas Creation')
-    expect(brand.attribution).toContain(brand.parentBrand)
+    expect(brand.primaryProductName).toBe(brand.productName)
+    expect(brand.brandName).toBe('Goated Panels')
+    expect(brand.hubName).toBe('Goated Panels Hub')
+    expect(brand.attribution).toContain(brand.brandName)
+    expect(brand.productAttribution).toContain(brand.productName)
     expect(brand.monogram.length).toBeGreaterThan(0)
+    expect(brand.hubMonogram.length).toBeGreaterThan(0)
+  })
+
+  it('treats the unregistered domain as text, never as a link', () => {
+    expect(brand.brandDomainStatus).toBe('unconfirmed')
+    expect(brand.productAttribution).toContain(brand.brandDomain)
+    for (const url of Object.values(brand.links)) {
+      expect(url).not.toContain(brand.brandDomain)
+    }
   })
 
   it('defines every accent stop as a hex colour', () => {

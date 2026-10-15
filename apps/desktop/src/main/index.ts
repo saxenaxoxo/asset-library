@@ -1,18 +1,21 @@
 import { app, dialog, nativeTheme, net, shell } from 'electron'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
+import { homedir } from 'os'
+import { brandIdentity } from '@brand/brand-identity'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { applySecurityPolicies, isTrustedSenderUrl } from './security'
 import { createMainWindow, mainWindow, RENDERER_INDEX } from './window'
 import { registerIpcHandlers } from './ipc'
-import { copyFileSync, existsSync, readdirSync } from 'fs'
+import { registerInstallerHandlers } from './ipc/installer'
+import { installerStatus } from './engine/installer-status'
+import { copyFileSync, existsSync, readdirSync, readFileSync, realpathSync } from 'fs'
 import { openDatabase } from './library/database'
 import { migrate, needsMigration } from './library/migrations'
 import { LibraryRepository } from './library/repository'
 import { LibraryService } from './library/service'
 import { PanelRequests } from './library/panel-requests'
-import { LIBRARY_EVENT_CHANNEL } from '@shared/channels'
 import { handleAssetProtocol, registerAssetScheme } from './media/protocol'
 import { WorkerClient } from './worker/client'
 import { mediaBinaries } from './media/binaries'
@@ -25,6 +28,9 @@ import { EngineTray } from './engine/tray'
 import { AudioPlayer } from './engine/audio-player'
 import { PanelInstaller, type UpiaRun } from './engine/panel-installer'
 import { UpdateChecker } from './engine/update-check'
+import { cepExtensionFolder, macAppBundle, Uninstaller } from './engine/uninstaller'
+import { prepareDataFolder } from './engine/data-folder'
+import { legacyMacApps } from './engine/legacy-install'
 import { isAllowedExternalUrl } from './security-rules'
 import { CatalogPublisher, readCatalogSnapshot } from './catalog/writer'
 import { workerCatalogPublishing } from './catalog/publishing'
@@ -37,19 +43,22 @@ import {
   startsInBackground
 } from './engine/launch'
 
+/** Unchanged by the rename to Goated Panels Hub: Windows and macOS know the app by it. */
+const APP_ID = 'com.saxenascreation.assetlibrary'
+
 const devServerUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
 const rendererFileUrlPrefix = pathToFileURL(RENDERER_INDEX).href
 
 registerAssetScheme()
 
-/** Opens the library window. The Dock icon goes away with it (the engine keeps running). */
+/** Opens the installer window. The Dock icon goes away with it (the engine keeps running). */
 function openMainWindow(): void {
   createMainWindow(devServerUrl).on('closed', () => {
     if (!mainWindow()) app.dock?.hide()
   })
 }
 
-/** Shows the library window (creating it if it was closed) and, on macOS, the Dock icon. */
+/** Shows the installer window (creating it if it was closed) and, on macOS, the Dock icon. */
 function showWindow(): void {
   const window = mainWindow()
   if (window) {
@@ -79,9 +88,12 @@ function handleEngineUrl(url: string): void {
   if (engineUrlAction(url) === 'open') showWindow()
 }
 
+// The data folder was "Asset Library" before the rename; move it before anything opens it.
+const dataFolder = prepareDataFolder()
+
 // One running instance. The app runs as a background engine for the Premiere panel; a second
 // launch shows the window, unless it's the panel starting the engine or a login start.
-if (!app.requestSingleInstanceLock()) {
+if (dataFolder.quit || !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   // macOS delivers assetlibrary:// URLs as an event, possibly before the app is ready.
@@ -101,7 +113,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
-    electronApp.setAppUserModelId('com.saxenascreation.assetlibrary')
+    electronApp.setAppUserModelId(APP_ID)
     nativeTheme.themeSource = 'dark'
     applySecurityPolicies()
     applyAppMenu(process.platform, app.getName())
@@ -140,12 +152,13 @@ if (!app.requestSingleInstanceLock()) {
     const mediaDir = join(app.getPath('userData'), 'media')
     const catalogDir = join(app.getPath('userData'), 'catalog')
     const productName = app.getName()
-    const importsFolder = join(app.getPath('videos'), `${productName} Imports`)
+    // Named after the product, not the app, so imports keep going to the folder they always did.
+    const importsFolder = join(app.getPath('videos'), `${brandIdentity.primaryProductName} Imports`)
     const settings = new SettingsStore(
       join(app.getPath('userData'), 'settings.json'),
       electronLoginItem()
     )
-    settings.init()
+    settings.init({ reapplyLoginItem: dataFolder.moved })
     handleAssetProtocol(repo, mediaDir)
     const appVersion = app.getVersion()
     // The catalog is built and written in the utility process (it's big for big libraries).
@@ -162,7 +175,8 @@ if (!app.requestSingleInstanceLock()) {
       worker,
       binaries,
       { mediaDir, catalogDir, appVersion },
-      (event) => mainWindow()?.webContents.send(LIBRARY_EVENT_CHANNEL, event),
+      // No window listens to scan events any more: the panel reads the catalog.
+      () => {},
       { publishCatalog, onCatalog: () => void status?.write() }
     )
     const updates = new UpdateChecker({
@@ -177,7 +191,8 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
       env: process.env,
       resourcesDir: app.isPackaged ? process.resourcesPath : null,
-      panelName: productName,
+      // The panel is the product: Adobe's installer knows it as Asset Library, whatever the app's name.
+      panelName: brandIdentity.primaryProductName,
       run: runProgram,
       exists: existsSync,
       listFiles: (dir) => readdirSync(dir)
@@ -215,7 +230,8 @@ if (!app.requestSingleInstanceLock()) {
       importsFolder,
       setStartAtLogin,
       setCheckForUpdates,
-      audio
+      audio,
+      ...(app.isPackaged ? { uninstall: () => void uninstaller.run() } : {})
     })
     // The Premiere panel asks for things (add a folder, import files…) through files.
     const panelRequests = new PanelRequests(catalogDir, {
@@ -257,9 +273,64 @@ if (!app.requestSingleInstanceLock()) {
       openUpdate: (url) => {
         if (isAllowedExternalUrl(url)) void shell.openExternal(url)
       },
+      uninstall: () => void uninstaller.run(),
       quit: () => app.quit()
     })
     refreshTray()
+
+    // Uninstall: from the panel's Settings, the tray menu or the macOS app menu.
+    const uninstaller = new Uninstaller({
+      platform: process.platform,
+      productName,
+      packaged: app.isPackaged,
+      execPath: process.execPath,
+      dataDir: app.getPath('userData'),
+      legacyDataDir: dataFolder.legacyDir,
+      cepFolder: cepExtensionFolder(process.platform, homedir(), app.getPath('appData')),
+      confirm: async () => {
+        // In the background the engine has no window; bring the question to the front.
+        app.focus({ steal: true })
+        const windows = process.platform === 'win32'
+        const { response, checkboxChecked } = await dialog.showMessageBox({
+          type: 'warning',
+          message: `Uninstall ${productName}?`,
+          detail: [
+            `This removes the ${productName} panel from Premiere Pro, stops ${productName} from starting at login, and ${windows ? 'runs its uninstaller' : 'moves the app to the Trash'}.`,
+            'Your own asset files are never touched.'
+          ].join('\n\n'),
+          checkboxLabel: 'Also delete my library: folder list, tags, favorites and thumbnails',
+          checkboxChecked: false,
+          buttons: ['Uninstall', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1
+        })
+        return { confirmed: response === 0, deleteData: checkboxChecked }
+      },
+      removePanels: () => panelInstaller.removeAll(),
+      forgetSystemEntries: () => {
+        electronLoginItem().set(false)
+        if (app.isPackaged) app.removeAsDefaultProtocolClient(ENGINE_SCHEME)
+      },
+      stopEngine: async () => {
+        panelRequests.stop()
+        audio.destroy()
+        updates.stop()
+        await engineStatus.shutdown()
+        tray.destroy()
+        library.stop()
+        worker.stop()
+        db.close()
+      },
+      exists: existsSync,
+      trash: (path) => shell.trashItem(path),
+      launch: (file, args) => spawn(file, args, { detached: true, stdio: 'ignore' }).unref(),
+      tell: async (kind, message, detail) => {
+        app.focus({ steal: true })
+        await dialog.showMessageBox({ type: kind, message, detail })
+      },
+      exit: () => app.exit(0)
+    })
+    applyAppMenu(process.platform, productName, { uninstall: () => void uninstaller.run() })
     engineStatus.onStatus((current) => {
       trayLine = statusLine(current)
       refreshTray()
@@ -290,13 +361,69 @@ if (!app.requestSingleInstanceLock()) {
       db.close()
     })
 
-    registerIpcHandlers(
-      (event) => isTrustedSenderUrl(event.senderFrame?.url, devServerUrl, rendererFileUrlPrefix),
-      { db, repo, library, worker, binaries }
-    )
+    const trustedSender = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean =>
+      isTrustedSenderUrl(event.senderFrame?.url, devServerUrl, rendererFileUrlPrefix)
+    registerIpcHandlers(trustedSender, { db, worker, binaries })
+    registerInstallerHandlers(trustedSender, {
+      status: () =>
+        installerStatus({
+          platform: process.platform,
+          env: process.env,
+          home: homedir(),
+          appVersion,
+          packaged: app.isPackaged,
+          dataDir: app.getPath('userData'),
+          cacheDir: mediaDir,
+          inventory: () => panelInstaller.inventory(),
+          bundled: () => panelInstaller.bundled(),
+          exists: existsSync,
+          listDir: (dir) => readdirSync(dir)
+        }),
+      install: async (builds) => {
+        installingPanel = true
+        refreshTray()
+        try {
+          return await panelInstaller.install(builds)
+        } finally {
+          installingPanel = false
+          refreshTray()
+        }
+      },
+      remove: (builds) => panelInstaller.removeAll(builds),
+      uninstall: () => void uninstaller.run()
+    })
     // Installed builds claim assetlibrary:// (macOS also learns it from Info.plist). In
     // development the bare Electron binary would be registered instead, so it's skipped.
     if (app.isPackaged) app.setAsDefaultProtocolClient(ENGINE_SCHEME)
+    // The app as installed before the rename has the same bundle ID, so macOS could open it for
+    // assetlibrary:// links or at login. Its data has moved here; the old app goes to the Trash.
+    if (app.isPackaged && process.platform === 'darwin' && dataFolder.realInstall) {
+      const old = legacyMacApps(
+        homedir(),
+        APP_ID,
+        macAppBundle(process.execPath),
+        (bundle) => {
+          try {
+            return readFileSync(join(bundle, 'Contents', 'Info.plist'), 'utf8')
+          } catch {
+            return null
+          }
+        },
+        (path) => {
+          try {
+            return realpathSync(path)
+          } catch {
+            return null
+          }
+        }
+      )
+      for (const bundle of old) {
+        shell.trashItem(bundle).then(
+          () => console.info(`Moved ${bundle} (the app before its rename) to the Trash.`),
+          (error: Error) => console.error(`Couldn't move ${bundle} to the Trash: ${error.message}`)
+        )
+      }
+    }
 
     const background = startsInBackground({
       argv: process.argv,
