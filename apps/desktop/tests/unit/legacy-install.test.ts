@@ -1,3 +1,4 @@
+import nodePath from 'path'
 import { describe, expect, it } from 'vitest'
 import { ENGINE_STALE_MS } from '@catalog/requests'
 import {
@@ -56,9 +57,11 @@ function oldEngine(
     ownPid: 99,
     mayStop: options.mayStop ?? true,
     readLink: (path) =>
-      platform === 'darwin' && path === `${LEGACY}/SingletonLock` ? 'Mac.local-4321' : null,
+      platform === 'darwin' && path === nodePath.join(LEGACY, 'SingletonLock')
+        ? 'Mac.local-4321'
+        : null,
     readText: (path) =>
-      alive && options.heartbeat && path === `${LEGACY}/catalog/engine.json`
+      alive && options.heartbeat && path === nodePath.join(LEGACY, 'catalog', 'engine.json')
         ? JSON.stringify({ updatedAt: clock - 1000, version: '0.4.0' })
         : null,
     isAlive: (pid) => alive && pid === 4321,
