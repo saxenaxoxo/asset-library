@@ -1,4 +1,5 @@
 // Reading the catalog and media from disk with Node, which the CEP runtime provides.
+import { plainPath } from '@catalog/requests'
 import { catalogPaths, findCatalog, parseCatalog, type Catalog } from '@catalog/types'
 import { detectWindows, storage } from './platform'
 import { fileUrl } from '../paths'
@@ -48,7 +49,9 @@ export async function locateCatalog(): Promise<string | null> {
 
 function pick(multiple: boolean, directory: boolean, title: string, types: string[]): string[] {
   const dialog = cep.cep?.fs.showOpenDialog(multiple, directory, title, '', types)
-  return dialog && dialog.err === 0 && dialog.data ? dialog.data : []
+  if (!dialog || dialog.err !== 0 || !dialog.data) return []
+  // On macOS the picker can answer with file:// URLs; the engine needs plain paths.
+  return dialog.data.map(plainPath).filter((path) => path.length > 0)
 }
 
 /** Lets the user point the panel at catalog.json by hand, and remembers the choice. */

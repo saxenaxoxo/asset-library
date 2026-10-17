@@ -9,6 +9,7 @@ import {
   writeFileSync
 } from 'fs'
 import { tmpdir } from 'os'
+import { pathToFileURL } from 'url'
 import { basename, join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { PanelRequest } from '@catalog/requests'
@@ -104,6 +105,23 @@ describe('add-folder', () => {
     expect(await run({ type: 'add-folder', path: file })).toMatchObject({ ok: false })
     expect(await run({ type: 'add-folder', path: 'relative/folder' })).toMatchObject({ ok: false })
     expect(repo.listRoots()).toEqual([])
+  })
+
+  it("adds a folder picked as a file:// URL, the way Adobe's CEP picker reports it on macOS", async () => {
+    const dir = join(tempDir(), 'My Drive', 'SFX & Hits 100%')
+    mkdirSync(dir, { recursive: true })
+    expect(await run({ type: 'add-folder', path: pathToFileURL(dir).href })).toMatchObject({
+      ok: true,
+      message: 'Added SFX & Hits 100%'
+    })
+    expect(repo.listRoots().map((root) => root.path)).toEqual([dir])
+  })
+
+  it('shows the location it was given when that still is not a full path', async () => {
+    expect(await run({ type: 'add-folder', path: 'relative/folder' })).toMatchObject({
+      ok: false,
+      message: `Couldn't add that folder: "relative/folder" isn't a full folder location.`
+    })
   })
 
   it('says so when the folder is already in the library', async () => {

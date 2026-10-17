@@ -1,7 +1,7 @@
 {
   "name": "asset-library",
   "productName": "Goated Panels Hub",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Goated Panels Hub: installs and runs Asset Library, a free asset manager for video editors, by Goated Panels.",
   "main": "./out/main/index.js",

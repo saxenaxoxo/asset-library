@@ -3,6 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 
+// The app's own version, so the tests don't need editing at every release.
+const { version: APP_VERSION } = JSON.parse(
+  readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')
+) as { version: string }
+
 // Launches the built app (run `electron-vite build` first; `pnpm test:e2e` does both).
 // E2E_EXECUTABLE runs the same tests against a packaged app instead of the dev build.
 function launch(userDataDir: string, ...extra: string[]): Promise<ElectronApplication> {
@@ -38,7 +43,7 @@ test('opens the installer: install, manage, about and help', async () => {
   await expect(methods.getByRole('radio')).toHaveCount(2)
   await expect(methods.getByText('Modern')).toBeVisible()
   await expect(methods.getByText('Legacy')).toBeVisible()
-  await expect(page.getByText(/Not installed|Installed:|Couldn't check/)).toBeVisible({
+  await expect(page.getByText(/Not installed|Installed:|Couldn't check/).first()).toBeVisible({
     timeout: 20_000
   })
   const primary = page.locator('footer').getByRole('button').last()
@@ -65,7 +70,7 @@ test('opens the installer: install, manage, about and help', async () => {
   await expect(page.getByText('App version')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Goated Panels Hub' })).toBeVisible()
   await expect(page.getByText('Asset Library by goatedpanels.in')).toBeVisible()
-  await expect(page.getByText('0.1.0').first()).toBeVisible()
+  await expect(page.getByText(APP_VERSION).first()).toBeVisible()
   await expect(page.getByRole('button', { name: /Source code/ })).toBeVisible()
   await page.getByRole('button', { name: 'Help', exact: true }).first().click()
   await expect(page.getByRole('heading', { name: 'Install in four steps' })).toBeVisible()
@@ -156,7 +161,9 @@ test('runs in the background as the engine for the Premiere panel', async () => 
   }
 
   // The engine reports in without opening a window.
-  await expect.poll(() => readJson('engine.json')?.['version'], { timeout: 15_000 }).toBe('0.1.0')
+  await expect
+    .poll(() => readJson('engine.json')?.['version'], { timeout: 15_000 })
+    .toBe(APP_VERSION)
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(0)
 
   // A request from the panel is carried out and its result shows up in engine.json.

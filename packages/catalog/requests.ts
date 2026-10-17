@@ -86,6 +86,26 @@ const ASSET_ID = /^[0-9a-f-]{36}$/
 const isId = (value: unknown): value is string => typeof value === 'string' && ASSET_ID.test(value)
 const isRootId = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0
+/**
+ * A path as a folder or file picker reports it, made plain. Adobe's CEP picker can return a
+ * `file://` URL with encoded characters (`%20` for a space) instead of a path; this turns
+ * `file:///Volumes/My%20Drive` into `/Volumes/My Drive` and `file:///C:/Clips` into `C:/Clips`.
+ * Anything else comes back trimmed and otherwise unchanged.
+ */
+export function plainPath(raw: string): string {
+  let path = raw.trim()
+  if (!/^file:/i.test(path)) return path
+  path = path.replace(/^file:(\/\/(localhost)?)?/i, '')
+  try {
+    path = decodeURIComponent(path)
+  } catch {
+    // A stray "%" that isn't an escape: keep the text as it is.
+  }
+  // file:///C:/… has a slash before the drive letter.
+  if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1)
+  return path
+}
+
 const isPath = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= MAX_PATH
 const isTag = (value: unknown): value is string =>

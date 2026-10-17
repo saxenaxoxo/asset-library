@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 (Mac), panel 0.4.2
+
+- Fixed: adding a library folder from the Premiere panel failed with "its location wasn't complete" when the folder's path contained spaces or other special characters. Adobe's folder picker reports such folders as a `file://` address; the panel and the app now turn it into a normal path. Importing files had the same problem and is fixed too.
+
 ## Unreleased
 
 ### Goated Panels

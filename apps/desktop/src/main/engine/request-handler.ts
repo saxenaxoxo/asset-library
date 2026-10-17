@@ -1,7 +1,7 @@
 import { constants } from 'fs'
 import { copyFile, mkdir, realpath, stat } from 'fs/promises'
 import { basename, isAbsolute, join, relative, sep } from 'path'
-import { numberedName, type PanelRequest, type RequestResult } from '@catalog/requests'
+import { numberedName, plainPath, type PanelRequest, type RequestResult } from '@catalog/requests'
 import { kindForFile } from '@shared/media-types'
 import type { RootRecord } from '@shared/library'
 import { safeJoin, type LibraryRepository } from '../library/repository'
@@ -174,7 +174,7 @@ export class RequestHandler {
         return [true, `Removed the tag “${request.tag}” from ${asset.filename}`]
       }
       case 'import-files':
-        return this.importFiles(request.files, request.rootId, request.folder ?? '')
+        return this.importFiles(request.files.map(plainPath), request.rootId, request.folder ?? '')
       case 'set-settings': {
         const name = this.env.productName
         const messages: string[] = []
@@ -235,8 +235,12 @@ export class RequestHandler {
       : [false, `Couldn't play ${asset.filename}: ${outcome.problem}.`]
   }
 
-  private async addFolder(path: string): Promise<[boolean, string]> {
-    if (!isAbsolute(path)) return [false, "Couldn't add that folder: its location wasn't complete."]
+  private async addFolder(picked: string): Promise<[boolean, string]> {
+    // Older panels pass on the picker's file:// URL as it is.
+    const path = plainPath(picked)
+    if (!isAbsolute(path)) {
+      return [false, `Couldn't add that folder: "${picked}" isn't a full folder location.`]
+    }
     const existing = this.repo.listRoots().find((root) => root.path === path)
     if (existing) return [true, `${existing.label} is already in the library`]
     try {

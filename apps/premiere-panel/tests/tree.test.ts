@@ -21,6 +21,7 @@ import {
   numberedName,
   parseEngineStatus,
   parseRequest,
+  plainPath,
   requestId,
   ENGINE_STALE_MS
 } from '@catalog/requests'
@@ -67,6 +68,23 @@ const catalog: Catalog = {
     asset('e', '')
   ]
 }
+
+describe('plainPath', () => {
+  it('turns picker file:// URLs into plain paths', () => {
+    expect(plainPath('file:///Volumes/Saxena%20-%202TB/SFX%20Pack')).toBe(
+      '/Volumes/Saxena - 2TB/SFX Pack'
+    )
+    expect(plainPath('file://localhost/Users/me/Clips/')).toBe('/Users/me/Clips/')
+    expect(plainPath('file:///C:/Users/me/Clips')).toBe('C:/Users/me/Clips')
+    expect(plainPath('FILE:///tmp/a%23b')).toBe('/tmp/a#b')
+  })
+
+  it('leaves plain paths alone, apart from stray spaces at the ends', () => {
+    expect(plainPath('/Volumes/SSD/100% Hits')).toBe('/Volumes/SSD/100% Hits')
+    expect(plainPath('  C:\\Clips  ')).toBe('C:\\Clips')
+    expect(plainPath('file:///tmp/100%')).toBe('/tmp/100%')
+  })
+})
 
 describe('buildFolderTree', () => {
   it('nests folders under their library folder, with counts that include subfolders', () => {
