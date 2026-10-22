@@ -13,6 +13,7 @@
     "package": "node scripts/build.mjs && node scripts/package.mjs",
     "package:cep": "node scripts/build.mjs --cep && node scripts/package.mjs --cep",
     "test:harness": "node scripts/build.mjs && node scripts/build.mjs --cep && playwright test",
+    "screenshot": "node scripts/build.mjs && SCREENSHOT=1 playwright test screenshot",
     "sign:cep": "node scripts/build.mjs --cep && node scripts/sign-cep.mjs"
   },
   "devDependencies": {
