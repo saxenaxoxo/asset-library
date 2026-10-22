@@ -32,7 +32,7 @@ AI tagging, light theme, Windows ARM, cloud anything, telemetry.
 
 1. **Never modify, move, rename, or delete user files.** No marker/sidecar files in user folders. All state lives in the app's own data folder.
 2. Works fully offline with no account.
-3. No telemetry. The only network call is the optional update check to GitHub.
+3. No telemetry. The only network calls are the optional update check to GitHub and reading the panel download list (when the Hub window opens or the editor installs a panel) and downloading a panel the editor chose to install (GitHub Release assets, HTTPS, allowlisted, SHA-256-verified; decision I4).
 
 ## 2. Architecture
 

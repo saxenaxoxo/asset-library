@@ -18,7 +18,8 @@
     "panel:build": "pnpm --filter asset-library-premiere-panel build",
     "panel:watch": "pnpm --filter asset-library-premiere-panel watch",
     "panel:package": "pnpm --filter asset-library-premiere-panel package",
-    "panel:sign:cep": "pnpm --filter asset-library-premiere-panel sign:cep"
+    "panel:sign:cep": "pnpm --filter asset-library-premiere-panel sign:cep",
+    "panels:release": "pnpm --filter asset-library panels:release"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",

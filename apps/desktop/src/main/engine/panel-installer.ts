@@ -212,6 +212,15 @@ export interface PanelInstallerDeps {
   run(file: string, args: string[]): Promise<UpiaRun>
   exists(path: string): boolean
   listFiles(dir: string): string[]
+  /** Adobe's installer at another path (automated tests use a stand-in). */
+  agentPath?: string | null
+}
+
+/** A panel file to install in place of the bundled one of its kind (a verified download). */
+export interface PanelFile {
+  kind: PanelKind
+  version: string
+  path: string
 }
 
 export interface PanelInstallResult {
@@ -224,7 +233,18 @@ export interface PanelInstallResult {
 const MAX_REMOVALS = 5
 
 export class PanelInstaller {
-  private running: Promise<PanelInstallResult> | null = null
+  /**
+   * Installs and removals run one after another, each with its own request: Adobe's installer
+   * mustn't get --install and --remove mixed, and a second install (say, a verified download
+   * while the start-up install of the bundled copy runs) must not get the first one's result.
+   */
+  private queue: Promise<unknown> = Promise.resolve()
+
+  private serial<T>(job: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(job, job)
+    this.queue = next.catch(() => undefined)
+    return next
+  }
 
   constructor(private readonly deps: PanelInstallerDeps) {}
 
@@ -247,7 +267,7 @@ export class PanelInstaller {
   }
 
   private agent(): string | null {
-    const path = upiaPath(this.deps.platform, this.deps.env)
+    const path = this.deps.agentPath || upiaPath(this.deps.platform, this.deps.env)
     return path && this.deps.exists(path) ? path : null
   }
 
@@ -281,18 +301,36 @@ export class PanelInstaller {
   }
 
   /**
-   * Removes any installed copies, then installs the bundled panel: the builds the installed
-   * Premiere versions need, or exactly `kinds` when the editor chose. Never throws.
+   * Removes any installed copies, then installs the panel: the builds the installed Premiere
+   * versions need, or exactly `kinds` when the editor chose. `files` (verified downloads) replace
+   * the bundled file of their kind. Never throws.
    */
-  install(kinds?: readonly PanelKind[]): Promise<PanelInstallResult> {
-    this.running ??= this.installNow(kinds).finally(() => {
-      this.running = null
+  install(
+    kinds?: readonly PanelKind[],
+    files: readonly PanelFile[] = []
+  ): Promise<PanelInstallResult> {
+    // The same install asked for twice at once (a double click) runs once.
+    const key = JSON.stringify([kinds ?? null, files.map((file) => [file.kind, file.path])])
+    if (this.waiting?.key === key) return this.waiting.result
+    const result = this.serial(() => {
+      if (this.waiting?.result === result) this.waiting = null
+      return this.installNow(kinds, files)
     })
-    return this.running
+    this.waiting = { key, result }
+    return result
   }
 
-  private async installNow(kinds?: readonly PanelKind[]): Promise<PanelInstallResult> {
-    const bundles = this.bundled()
+  /** The install queued but not started yet, so an identical request can share it. */
+  private waiting: { key: string; result: Promise<PanelInstallResult> } | null = null
+
+  private async installNow(
+    kinds: readonly PanelKind[] | undefined,
+    files: readonly PanelFile[]
+  ): Promise<PanelInstallResult> {
+    const bundles: PanelFile[] = [
+      ...files,
+      ...this.bundled().filter((bundle) => !files.some((file) => file.kind === bundle.kind))
+    ]
     if (bundles.length === 0) {
       return { ok: false, message: "This copy of the app doesn't include the Premiere Pro panel." }
     }
@@ -375,7 +413,11 @@ export class PanelInstaller {
   }
 
   /** Removes one build (CEP or UXP), or both (for uninstalling the app). Never throws. */
-  async removeAll(kinds: readonly PanelKind[] = ['cep', 'uxp']): Promise<PanelInstallResult> {
+  removeAll(kinds: readonly PanelKind[] = ['cep', 'uxp']): Promise<PanelInstallResult> {
+    return this.serial(() => this.removeAllNow(kinds))
+  }
+
+  private async removeAllNow(kinds: readonly PanelKind[]): Promise<PanelInstallResult> {
     const agent = this.agent()
     // Without Adobe's installer there's nothing it could have installed.
     if (!agent) return { ok: true, message: 'No Premiere Pro panel was installed.' }

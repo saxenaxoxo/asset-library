@@ -2,8 +2,9 @@ import { isAllowedExternalUrl } from '../security-rules'
 import { compareVersions } from './panel-installer'
 import type { AvailableUpdate } from './settings'
 
-// The app's only network call: once a day (when the editor hasn't turned it off), ask GitHub
-// for the latest release. Nothing is sent but the request itself.
+// One of the app's two network calls (the other is the panel download list, read only when the
+// editor opens the Hub window or installs a panel: ./panel-delivery.ts): once a day, when the editor hasn't turned it off, ask
+// GitHub for the latest release. Nothing is sent but the request itself.
 
 export const LATEST_RELEASE_URL =
   'https://api.github.com/repos/saxenaxoxo/asset-library/releases/latest'

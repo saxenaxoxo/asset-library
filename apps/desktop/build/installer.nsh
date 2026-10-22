@@ -46,8 +46,8 @@
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "com.saxenascreation.assetlibrary"
     DeleteRegKey HKCU "Software\Classes\assetlibrary"
 
-    ; The library data. The app passes --delete-app-data when the editor already chose to delete
-    ; it; otherwise ask (silent uninstalls keep it).
+    ; The library data. The app passes --delete-app-data or --keep-app-data when the editor
+    ; already chose in its own dialog; otherwise ask (silent uninstalls keep it).
     StrCpy $R2 "keep"
     ClearErrors
     ${GetParameters} $R0
@@ -55,6 +55,11 @@
     ${ifNot} ${Errors}
       StrCpy $R2 "delete"
     ${else}
+      ClearErrors
+      ${GetOptions} $R0 "--keep-app-data" $R1
+      ${ifNot} ${Errors}
+        Goto keepLibrary
+      ${endif}
       MessageBox MB_YESNO|MB_ICONQUESTION "Also delete your library (folder list, tags, favorites and thumbnails)?$\r$\n$\r$\nYour own asset files are never touched." /SD IDNO IDNO keepLibrary
         StrCpy $R2 "delete"
       keepLibrary:

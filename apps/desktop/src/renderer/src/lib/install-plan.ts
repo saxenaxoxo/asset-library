@@ -1,4 +1,4 @@
-import type { InstallerStatus } from '@shared/api'
+import type { InstallerStatus, InstallProgress } from '@shared/api'
 import {
   buildFit,
   installedPanels,
@@ -20,6 +20,7 @@ export type Busy = 'install' | 'remove' | null
 export type PrimaryState =
   | 'checking'
   | 'install'
+  | 'downloading'
   | 'installing'
   | 'installed'
   | 'update'
@@ -27,6 +28,7 @@ export type PrimaryState =
   | 'failed'
   | 'unsupported'
   | 'unavailable'
+  | 'offline'
 
 export interface PrimaryAction {
   state: PrimaryState
@@ -46,6 +48,55 @@ export interface InstallPlan {
   installed: InstalledPanel[]
   primary: PrimaryAction
   canUninstall: boolean
+  /** What's happening right now, in words ("Downloading CEP 0.4.2: 1.2 MB of 3.4 MB"). */
+  activity: string | null
+  /** Download progress from 0 to 1, from real byte counts; null when nothing is downloading. */
+  fraction: number | null
+  /** A download in progress can be cancelled (an install can't). */
+  canCancel: boolean
+}
+
+/** "840 KB", "3.4 MB". */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** The version Install would put in place for a build, from a download or the Hub itself. */
+export function availableVersion(status: InstallerStatus, build: PanelBuild): string | null {
+  return status.available[build]?.version ?? null
+}
+
+/** The busy button and the line beside it, from the real progress main reports. */
+function busyInstall(progress: InstallProgress): {
+  primary: PrimaryAction
+  activity: string | null
+  fraction: number | null
+} {
+  if (progress?.phase === 'downloading' && progress.total > 0) {
+    const fraction = Math.min(1, progress.received / progress.total)
+    const what = progress.build
+      ? `${PANEL_BUILDS[progress.build].label} ${progress.version ?? ''}`.trim()
+      : 'the panel'
+    return {
+      primary: disabled('downloading', `Downloading ${Math.floor(fraction * 100)}%`),
+      activity: `Downloading ${what}: ${formatBytes(progress.received)} of ${formatBytes(progress.total)}`,
+      fraction
+    }
+  }
+  if (progress?.phase === 'verifying') {
+    return {
+      primary: disabled('installing', 'Verifying…'),
+      activity: 'Checking the download against its checksum…',
+      fraction: 1
+    }
+  }
+  return {
+    primary: disabled('installing', 'Installing…'),
+    activity:
+      progress?.phase === 'installing' ? "Installing with Adobe's plug-in installer…" : null,
+    fraction: null
+  }
 }
 
 const disabled = (state: PrimaryState, label: string, reason?: string): PrimaryAction => ({
@@ -57,19 +108,31 @@ const disabled = (state: PrimaryState, label: string, reason?: string): PrimaryA
 
 export function planInstall(
   status: InstallerStatus | null,
-  options: { app: HostApp; choice: Choice; busy: Busy; failed: boolean }
+  options: {
+    app: HostApp
+    choice: Choice
+    busy: Busy
+    failed: boolean
+    progress?: InstallProgress
+  }
 ): InstallPlan {
   const versions = status?.premiere.map((host) => host.version) ?? []
   const installed = installedPanels(status?.premiere ?? [])
   const recommended = recommendedBuilds(versions)
   const targets = options.choice === 'recommended' ? recommended : [options.choice]
-  const plan = (primary: PrimaryAction): InstallPlan => ({
+  const plan = (
+    primary: PrimaryAction,
+    extra: { activity?: string | null; fraction?: number | null } = {}
+  ): InstallPlan => ({
     versions,
     recommended,
     targets,
     installed,
     primary,
-    canUninstall: options.app === 'premiere' && installed.length > 0 && options.busy === null
+    canUninstall: options.app === 'premiere' && installed.length > 0 && options.busy === null,
+    activity: extra.activity ?? null,
+    fraction: extra.fraction ?? null,
+    canCancel: primary.state === 'downloading'
   })
 
   if (options.app === 'after-effects') {
@@ -77,15 +140,18 @@ export function planInstall(
       disabled('unavailable', 'Not available yet', "There's no After Effects panel to install yet.")
     )
   }
-  if (options.busy === 'install') return plan(disabled('installing', 'Installing…'))
+  if (options.busy === 'install') {
+    const { primary, ...extra } = busyInstall(options.progress ?? null)
+    return plan(primary, extra)
+  }
   if (options.busy === 'remove') return plan(disabled('uninstalling', 'Uninstalling…'))
   if (!status) return plan(disabled('checking', 'Checking…'))
-  if (!status.packaged) {
+  if (!status.packaged && status.catalog.state !== 'ok') {
     return plan(
       disabled(
         'unavailable',
         'Install Asset Library',
-        "This development copy doesn't include the panel, so there's nothing to install."
+        "This development copy doesn't include the panel and couldn't read the download list, so there's nothing to install."
       )
     )
   }
@@ -122,24 +188,30 @@ export function planInstall(
       return plan(disabled('unsupported', 'Unsupported', fits[0]?.reason))
     }
   }
-  const missing = targets.find((build) => !status.bundled[build])
+  const missing = targets.find((build) => !status.available[build])
   if (missing) {
+    const label = PANEL_BUILDS[missing].label
+    const { state, message } = status.catalog
+    const reason =
+      state === 'ok'
+        ? `No ${label} build is available to download yet.`
+        : state === 'offline'
+          ? `You're offline, and this copy of the Hub doesn't include the ${label} build. Connect to the internet, then click Check again.`
+          : `This copy of the Hub doesn't include the ${label} build, and the download list couldn't be used${message ? `: ${message}` : '.'}`
     return plan(
-      disabled(
-        'unavailable',
-        'Install Asset Library',
-        `This copy of the app doesn't include the ${PANEL_BUILDS[missing].label} build.`
-      )
+      disabled(state === 'offline' ? 'offline' : 'unavailable', 'Install Asset Library', reason)
     )
   }
   if (options.failed) return plan({ state: 'failed', label: 'Try again', disabled: false })
 
-  const states = targets.map((build) => installState(installed, build, status.bundled[build]))
+  const states = targets.map((build) =>
+    installState(installed, build, availableVersion(status, build))
+  )
   if (states.includes('update-available')) {
     const build = targets[states.indexOf('update-available')] as PanelBuild
     return plan({
       state: 'update',
-      label: `Update to ${status.bundled[build] ?? ''}`.trim(),
+      label: `Update to ${availableVersion(status, build) ?? ''}`.trim(),
       disabled: false
     })
   }

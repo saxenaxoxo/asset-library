@@ -88,4 +88,36 @@ describe('SettingsStore', () => {
     expect(loginItem.set).toHaveBeenCalledWith(true)
     expect(saved()).toEqual({ startAtLogin: true })
   })
+
+  it('lets the installed copy apply a choice a copy from the disk image could not', () => {
+    // Opened from the disk image first: the OS entry can't be touched (get() is null).
+    const fromDiskImage = new SettingsStore(file, { set: () => {}, get: () => null })
+    fromDiskImage.init()
+    expect(saved()).toEqual({ startAtLogin: true, loginItemPending: true })
+
+    // Then the copy in Applications starts: the OS says "off" only because nobody set it yet.
+    os = false
+    loginItem.set.mockClear()
+    const installed = new SettingsStore(file, loginItem)
+    installed.init()
+    expect(loginItem.set).toHaveBeenCalledExactlyOnceWith(true)
+    expect(installed.settings.startAtLogin).toBe(true)
+    expect(saved()).toEqual({ startAtLogin: true })
+  })
+
+  it('remembers that the background note was shown', () => {
+    const store = new SettingsStore(file, loginItem)
+    expect(store.backgroundNoteShown).toBe(false)
+    store.recordBackgroundNoteShown()
+    expect(new SettingsStore(file, loginItem).backgroundNoteShown).toBe(true)
+  })
+
+  it("doesn't take the OS entry as the editor's choice when the data move didn't finish", () => {
+    writeFileSync(file, JSON.stringify({ startAtLogin: true }))
+    os = false // the entry still names the app under its old name
+    const store = new SettingsStore(file, loginItem)
+    store.init({ trustLoginItem: false })
+    expect(store.settings.startAtLogin).toBe(true)
+    expect(saved()).toEqual({ startAtLogin: true })
+  })
 })

@@ -6,6 +6,29 @@
 
 ## Unreleased
 
+### Clearer that the Hub is the engine, and fixes
+
+- Goated Panels Hub now says plainly that it is the engine the Asset Library panel needs and keeps running in the background: a status line at the top of its window, a **Background engine** section in Manage with a **Start Goated Panels Hub when I log in** switch (on by default), next steps after installing, a fifth step in Help, a clearer menu-bar menu and tooltip, and a one-time note the first time you close the window. **Close** is now **Close window**.
+- Quitting from the menu-bar menu or with Cmd+Q now asks first, because the panel stops updating without the Hub.
+- The Premiere panel shows a banner with a **Start Goated Panels Hub** button when the Hub isn't running, and its Settings explain what the Hub does.
+- Fixed: the panel could start an old copy of the app (a test build or one on the disk image) instead of the one in Applications. Only the installed copy now registers itself for the panel and for start at login; other copies hand over to it.
+- Fixed: importing more than 500 files at once failed; big imports now go in several parts.
+- Fixed: requests sent while the Hub was still starting could be cancelled with "isn't running" even though it was on its way. The panel now waits up to a minute after starting it.
+- Fixed: adding the same folder twice (once with a trailing slash, or as a `file://` address) indexed it twice.
+- Fixed: network-share folders (`file://server/share`) and folder names with a stray "%" weren't read correctly.
+- Fixed: a downloads folder that couldn't be written to crashed the Hub; a download server that never answered left the install hanging; and two installs at once (menu bar and window) could install the older panel and report the wrong result.
+- Fixed: the uninstall dialog named the wrong thing ("the Goated Panels Hub panel"); deleting your library left a broken "Asset Library" link behind on macOS; and on Windows the uninstaller asked again whether to delete the library.
+- Fixed: a data-folder move that didn't finish could switch start at login off.
+- The UXP panel may now open web links (the "Get it" update link).
+
+### Panel downloads
+
+- Goated Panels Hub can now download a newer Premiere Pro panel instead of waiting for a new Hub release. It reads a small download list from the project's GitHub Releases, downloads the panel file, checks its size and SHA-256 fingerprint, and only then installs it with Adobe's plug-in installer. A file that doesn't match is deleted and nothing is installed.
+- The panel built into the Hub stays as the fallback: it's used offline, when the download list can't be read, or when the list has nothing newer.
+- Install and Manage show where each panel comes from and its download size, real download progress (Downloading n%, with the bytes so far) with a Cancel button, then Verifying and Installing. Manage shows **Update available** as soon as the download list has a newer panel. Being offline is shown plainly.
+- Network use: besides the optional daily update check, the Hub contacts GitHub only when you open its window or install a panel. No account, cookies or identifiers are sent, and only this project's GitHub release files are allowed.
+- For maintainers: `pnpm panels:release` builds and signs both panels and writes the download list; publishing is described in `docs/releasing-panels.md`.
+
 ### Goated Panels
 
 - Asset Library is now made by **Goated Panels**. The desktop window is called **Goated Panels Hub** and wears the new Goated Panels mark and app icon; the Premiere panel's About line reads "by Goated Panels".

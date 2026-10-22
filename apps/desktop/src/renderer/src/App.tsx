@@ -5,11 +5,13 @@ import {
   BottomActionBar,
   BrandHeader,
   ConfirmationDialog,
+  EngineStatusBar,
   SidebarNavigation,
   type Screen
 } from './components/AppChrome'
 import { AboutScreen, HelpScreen, InstallScreen, ManageScreen } from './components/Screens'
 import { useInstaller } from './hooks/useInstaller'
+import { useEngine } from './hooks/useEngine'
 import { planInstall, type Choice, type HostApp } from './lib/install-plan'
 import { buttonClass } from './lib/ui'
 
@@ -26,7 +28,8 @@ const SCREEN_TITLES: Record<Screen, string> = {
 /** The installer and manager window. The asset browser itself is the panel inside Premiere. */
 export default function App(): React.JSX.Element {
   const installer = useInstaller()
-  const { status, error, busy, result } = installer
+  const engine = useEngine()
+  const { status, error, busy, progress, result } = installer
   const [screen, setScreen] = useState<Screen>('install')
   const [app, setApp] = useState<HostApp>('premiere')
   const [choice, setChoice] = useState<Choice>('recommended')
@@ -34,10 +37,11 @@ export default function App(): React.JSX.Element {
   const [removal, setRemoval] = useState<RemovalTarget>(null)
   const main = useRef<HTMLElement>(null)
 
-  const failed = result?.action === 'install' && !result.ok
+  // A cancelled download isn't a failure: the button goes back to Install.
+  const failed = result?.action === 'install' && !result.ok && result.code !== 'cancelled'
   const plan = useMemo(
-    () => planInstall(status, { app, choice, busy, failed }),
-    [status, app, choice, busy, failed]
+    () => planInstall(status, { app, choice, busy, failed, progress }),
+    [status, app, choice, busy, failed, progress]
   )
 
   // A new screen starts at the top.
@@ -71,6 +75,7 @@ export default function App(): React.JSX.Element {
   return (
     <div className="flex h-full flex-col">
       <BrandHeader macOS={status?.platform === 'darwin'} onHelp={() => setScreen('help')} />
+      <EngineStatusBar engine={engine.state} platform={status?.platform} />
       <div className="flex min-h-0 flex-1">
         <SidebarNavigation current={screen} onChange={setScreen} />
         <main
@@ -95,12 +100,15 @@ export default function App(): React.JSX.Element {
                 onManualVersion={setManualVersion}
                 onRetry={() => void installer.refresh()}
                 onReveal={reveal}
+                justInstalled={result?.action === 'install' && result.ok}
               />
             )}
             {screen === 'manage' && (
               <ManageScreen
                 status={status}
                 error={error}
+                engine={engine.state}
+                onStartAtLogin={engine.setStartAtLogin}
                 installed={installed}
                 busy={busy !== null}
                 onUpdate={(build) => void installer.install([build])}
@@ -120,9 +128,23 @@ export default function App(): React.JSX.Element {
         primary={plan.primary}
         onPrimary={() => void installer.install(plan.targets)}
         onClose={() => window.close()}
-        message={result ? { ok: result.ok, text: result.message } : null}
+        message={
+          plan.activity
+            ? { tone: 'neutral', text: plan.activity }
+            : result
+              ? {
+                  tone: result.ok ? 'ok' : result.code === 'cancelled' ? 'neutral' : 'error',
+                  text: result.message
+                }
+              : null
+        }
+        fraction={plan.fraction}
         secondary={
-          plan.canUninstall ? (
+          plan.canCancel ? (
+            <button type="button" onClick={installer.cancel} className={buttonClass('quiet')}>
+              Cancel download
+            </button>
+          ) : plan.canUninstall ? (
             <button
               type="button"
               onClick={() => setRemoval({ kind: 'all' })}

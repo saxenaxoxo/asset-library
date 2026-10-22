@@ -44,6 +44,8 @@ function setup(
     panelsOk?: boolean
     existing?: string[]
     trashFails?: string[]
+    /** Replaces the plain `existing` list (e.g. to model a link whose target was trashed). */
+    exists?: (path: string, trashed: readonly string[]) => boolean
   } = {}
 ): { uninstaller: Uninstaller; steps: string[]; told: Parameters<UninstallerDeps['tell']>[] } {
   const steps: string[] = []
@@ -69,7 +71,13 @@ function setup(
     },
     forgetSystemEntries: () => void steps.push('forget login and link'),
     stopEngine: async () => void steps.push('stop engine'),
-    exists: (path) => (options.existing ?? []).includes(path),
+    exists: (path) =>
+      options.exists
+        ? options.exists(
+            path,
+            steps.filter((step) => step.startsWith('trash ')).map((step) => step.slice(6))
+          )
+        : (options.existing ?? []).includes(path),
     trash: async (path) => {
       steps.push(`trash ${path}`)
       if ((options.trashFails ?? []).includes(path)) throw new Error('no')
@@ -92,6 +100,19 @@ describe('Uninstaller', () => {
     await uninstaller.run()
     expect(steps).toContain(`trash ${DATA}`)
     expect(steps.indexOf(`trash ${LEGACY_DATA}`)).toBeGreaterThan(steps.indexOf(`trash ${DATA}`))
+  })
+
+  it("trashes the old name's link even though it points nowhere once the data is gone", async () => {
+    const { uninstaller, steps } = setup({
+      choice: { confirmed: true, deleteData: true },
+      // Like existsSync: the link counts as there only while its target is.
+      exists: (path, trashed) =>
+        (path === DATA || path === LEGACY_DATA) &&
+        !trashed.includes(DATA) &&
+        !trashed.includes(path)
+    })
+    await uninstaller.run()
+    expect(steps).toContain(`trash ${LEGACY_DATA}`)
   })
 
   it("leaves the data folder's old name alone when the library is kept", async () => {
@@ -189,11 +210,22 @@ describe('Uninstaller', () => {
     expect(told).toEqual([])
   })
 
-  it('on Windows keeps the data unless asked', async () => {
+  it('on Windows keeps the data unless asked, and tells the uninstaller not to ask again', async () => {
     const uninstallerExe = windowsUninstaller(WIN_EXEC, 'Asset Library')
     const { uninstaller, steps } = setup({ platform: 'win32', existing: [uninstallerExe] })
     await uninstaller.run()
-    expect(steps).toContain(`launch ${uninstallerExe}`)
+    expect(steps).toContain(`launch ${uninstallerExe} --keep-app-data`)
+  })
+
+  it('on Windows still says what went wrong before handing over', async () => {
+    const uninstallerExe = windowsUninstaller(WIN_EXEC, 'Asset Library')
+    const { uninstaller, told } = setup({
+      platform: 'win32',
+      panelsOk: false,
+      existing: [uninstallerExe]
+    })
+    await uninstaller.run()
+    expect(told[0]?.[2]).toContain('Panel stayed.')
   })
 
   it('on Windows points to Settings → Apps when the uninstaller is missing', async () => {

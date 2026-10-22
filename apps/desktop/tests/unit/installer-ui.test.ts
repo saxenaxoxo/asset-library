@@ -8,7 +8,12 @@ import {
   recommendedBuild,
   recommendedBuilds
 } from '@shared/installer'
-import { isSelected, planInstall, type Choice } from '../../src/renderer/src/lib/install-plan'
+import {
+  formatBytes,
+  isSelected,
+  planInstall,
+  type Choice
+} from '../../src/renderer/src/lib/install-plan'
 import {
   cepExtensionCandidates,
   installerStatus,
@@ -63,6 +68,12 @@ describe('compatibility rules', () => {
   })
 })
 
+const builtIn = (version: string): InstallerStatus['available']['cep'] => ({
+  version,
+  from: 'bundled',
+  size: null
+})
+
 function status(overrides: Partial<InstallerStatus> = {}): InstallerStatus {
   return {
     appVersion: '0.1.0',
@@ -71,6 +82,9 @@ function status(overrides: Partial<InstallerStatus> = {}): InstallerStatus {
     adobeInstaller: true,
     premiere: [{ version: '26.5.2', cep: [], uxp: [] }],
     bundled: { cep: '0.4.1', uxp: '0.4.1' },
+    available: { cep: builtIn('0.4.1'), uxp: builtIn('0.4.1') },
+    catalog: { state: 'ok', message: null },
+    otherProducts: [],
     locations: { premiereApps: [], cepExtensions: [], data: '/data', cache: '/data/media' },
     ...overrides
   }
@@ -123,7 +137,10 @@ describe('install plan', () => {
   })
 
   it("explains why it can't install", () => {
-    expect(plan(status({ packaged: false })).primary.reason).toMatch(/development copy/)
+    // A development copy carries no panel; without the download list there's nothing to install.
+    expect(
+      plan(status({ packaged: false, catalog: { state: 'offline', message: null } })).primary.reason
+    ).toMatch(/development copy/)
     expect(plan(status({ adobeInstaller: false, premiere: [] })).primary.reason).toMatch(
       /Creative Cloud/
     )
@@ -131,9 +148,18 @@ describe('install plan', () => {
     expect(
       plan(status({ premiere: [{ version: '22.0', cep: [], uxp: [] }] })).primary
     ).toMatchObject({ state: 'unsupported', disabled: true })
-    expect(plan(status({ bundled: { cep: null, uxp: '0.4.1' } })).primary.reason).toMatch(
-      /doesn't include the CEP build/
-    )
+    expect(
+      plan(
+        status({
+          bundled: { cep: null, uxp: '0.4.1' },
+          available: { cep: null, uxp: builtIn('0.4.1') },
+          catalog: { state: 'offline', message: null }
+        })
+      ).primary
+    ).toMatchObject({
+      state: 'offline',
+      reason: expect.stringMatching(/doesn't include the CEP build/)
+    })
     expect(
       plan(status({ premiere: [{ version: '25.0', cep: [], uxp: [] }] }), 'uxp').primary
     ).toMatchObject({ state: 'unsupported' })
@@ -157,6 +183,106 @@ describe('install plan', () => {
     expect(plan(both).targets).toEqual(['uxp', 'cep'])
     expect(isSelected('recommended', ['uxp', 'cep'], 'cep')).toBe(true)
     expect(isSelected('uxp', ['uxp', 'cep'], 'cep')).toBe(false)
+  })
+})
+
+describe('install plan with downloads', () => {
+  const downloadable = (
+    version: string,
+    size = 3_565_158
+  ): InstallerStatus['available']['cep'] => ({
+    version,
+    from: 'download',
+    size
+  })
+
+  it('offers an update when the download list has a newer panel than installed', () => {
+    const s = status({
+      premiere: [{ version: '26.5.2', cep: ['0.4.1'], uxp: [] }],
+      available: { cep: downloadable('0.5.0'), uxp: builtIn('0.4.1') }
+    })
+    expect(plan(s).primary).toMatchObject({ state: 'update', label: 'Update to 0.5.0' })
+    expect(installState(plan(s).installed, 'cep', s.available.cep?.version ?? null)).toBe(
+      'update-available'
+    )
+  })
+
+  it('shows real download progress, then verifying and installing', () => {
+    const s = status({ available: { cep: downloadable('0.5.0'), uxp: null } })
+    const busy = (
+      progress: Parameters<typeof planInstall>[1]['progress']
+    ): ReturnType<typeof planInstall> =>
+      planInstall(s, {
+        app: 'premiere',
+        choice: 'recommended',
+        busy: 'install',
+        failed: false,
+        progress
+      })
+    const downloading = busy({
+      phase: 'downloading',
+      build: 'cep',
+      version: '0.5.0',
+      received: 1_500_000,
+      total: 3_565_158
+    })
+    expect(downloading.primary).toMatchObject({
+      state: 'downloading',
+      label: 'Downloading 42%',
+      disabled: true
+    })
+    expect(downloading.activity).toBe('Downloading CEP 0.5.0: 1.4 MB of 3.4 MB')
+    expect(downloading.fraction).toBeCloseTo(0.42, 2)
+    expect(downloading.canCancel).toBe(true)
+    expect(
+      busy({ phase: 'verifying', build: 'cep', version: '0.5.0', received: 1, total: 1 }).primary
+        .label
+    ).toBe('Verifying…')
+    const installing = busy({
+      phase: 'installing',
+      build: null,
+      version: null,
+      received: 0,
+      total: 0
+    })
+    expect(installing.primary).toMatchObject({ state: 'installing', label: 'Installing…' })
+    expect(installing.canCancel).toBe(false)
+    // Before main reports anything, nothing is claimed.
+    expect(busy(null).primary.label).toBe('Installing…')
+    expect(busy(null).fraction).toBeNull()
+  })
+
+  it('installs from a download in a development copy when the list was read', () => {
+    const s = status({
+      packaged: false,
+      bundled: { cep: null, uxp: null },
+      available: { cep: downloadable('0.5.0'), uxp: null }
+    })
+    expect(plan(s).primary).toMatchObject({ state: 'install', disabled: false })
+  })
+
+  it('explains a missing build by what happened to the download list', () => {
+    const none = { cep: null, uxp: null }
+    expect(plan(status({ available: none })).primary.reason).toBe(
+      'No CEP build is available to download yet.'
+    )
+    expect(
+      plan(
+        status({
+          available: none,
+          catalog: {
+            state: 'invalid',
+            message: 'The download list needs a newer version of Goated Panels Hub.'
+          }
+        })
+      ).primary.reason
+    ).toMatch(/couldn't be used: The download list needs a newer version/)
+  })
+
+  it('formats sizes in words people know', () => {
+    expect(formatBytes(512)).toBe('1 KB')
+    expect(formatBytes(840 * 1024)).toBe('840 KB')
+    expect(formatBytes(3_565_158)).toBe('3.4 MB')
   })
 })
 
@@ -206,6 +332,14 @@ describe('installer status', () => {
       cacheDir: '/data/media',
       inventory: async () => null,
       bundled: () => [{ kind: 'cep', version: '0.4.1' }],
+      catalog: async () => ({
+        state: 'offline',
+        message: 'offline',
+        checkedAt: 1,
+        manifest: null
+      }),
+      sources: () => ({ cep: { from: 'bundled', version: '0.4.1' }, uxp: null }),
+      otherProducts: () => [],
       exists: () => false,
       listDir: () => []
     })
@@ -216,6 +350,9 @@ describe('installer status', () => {
       adobeInstaller: false,
       premiere: [],
       bundled: { cep: '0.4.1', uxp: null },
+      available: { cep: { version: '0.4.1', from: 'bundled', size: null }, uxp: null },
+      catalog: { state: 'offline', message: 'offline' },
+      otherProducts: [],
       locations: { premiereApps: [], cepExtensions: [], data: '/data', cache: '/data/media' }
     })
   })

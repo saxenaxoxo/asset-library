@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs'
 import { Menu, nativeImage, Tray, type NativeImage } from 'electron'
 import { brandIdentity } from '@brand/brand-identity'
+import { engineCopy } from '@shared/engine-copy'
 import macIcon from '../../../resources/trayTemplate.png?asset'
 import macIcon2x from '../../../resources/trayTemplate@2x.png?asset'
 import winIcon from '../../../resources/tray.png?asset'
@@ -15,6 +16,7 @@ export interface TrayActions {
   openUpdate(url: string): void
   /** Asks to confirm, then removes the app, its panel and (if chosen) its data. */
   uninstall(): void
+  /** Asks to confirm (the panel needs the engine), then quits. */
   quit(): void
 }
 
@@ -55,7 +57,7 @@ export class EngineTray {
     platform: NodeJS.Platform = process.platform
   ) {
     this.tray = new Tray(trayImage(platform))
-    this.tray.setToolTip(productName)
+    this.tray.setToolTip(engineCopy.trayRunning)
     // On Windows a click on the icon is the usual way to bring an app back.
     if (platform !== 'darwin') this.tray.on('click', () => actions.openWindow())
   }
@@ -66,9 +68,11 @@ export class EngineTray {
     if (key === this.shown) return
     this.shown = key
     const { line, startAtLogin, update } = state
-    this.tray.setToolTip(`${this.productName}: ${line}`)
+    this.tray.setToolTip(engineCopy.trayTooltip(line))
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
+        // Says first that this is the engine and that it's on; then what it's doing.
+        { label: engineCopy.trayRunning, enabled: false },
         { label: line, enabled: false },
         ...(update
           ? [
@@ -86,14 +90,14 @@ export class EngineTray {
           click: () => this.actions.installPanel()
         },
         {
-          label: 'Start at login',
+          label: engineCopy.trayStartAtLogin,
           type: 'checkbox',
           checked: startAtLogin,
           click: (item) => this.actions.setStartAtLogin(item.checked)
         },
         { type: 'separator' },
         { label: `Uninstall ${this.productName}…`, click: () => this.actions.uninstall() },
-        { label: `Quit ${this.productName}`, click: () => this.actions.quit() }
+        { label: engineCopy.trayQuit, click: () => this.actions.quit() }
       ])
     )
   }

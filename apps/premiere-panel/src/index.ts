@@ -22,7 +22,7 @@ import {
   tagKey,
   type FolderNode
 } from '@catalog/tree'
-import type { EngineStatus, PanelRequest } from '@catalog/requests'
+import { importBatches, type EngineStatus, type PanelRequest } from '@catalog/requests'
 import { brandIdentity } from '@brand/brand-identity'
 import {
   chooseCatalog,
@@ -86,6 +86,13 @@ const POLL_MS = 3000
 const ENGINE_POLL_MS = 2000
 /** A request the engine hasn't picked up by now means it isn't running. */
 const REQUEST_TIMEOUT_MS = 12_000
+/**
+ * After asking the Hub to start, its first start can take a while (macOS checks a downloaded
+ * app, the library may need an upgrade), so requests wait this long before giving up.
+ */
+const ENGINE_START_TIMEOUT_MS = 60_000
+/** A request the running engine never answered (its result scrolled out of engine.json). */
+const REQUEST_FORGET_MS = 120_000
 /** Below this panel width the folder tree hides itself (the toolbar button brings it back). */
 const NARROW_PX = 340
 
@@ -354,7 +361,15 @@ const statusLine = el('div', 'status')
 bottomRow.append(progressBar, statusLine)
 footer.append(tagRow, controls, bottomRow)
 
-app.append(topbar, header, body, settingsPane, footer)
+// Shown when the Hub isn't running: it's the engine this panel needs. Built once (see above).
+const engineBanner = el('div', 'engine-banner')
+const engineBannerText = el('span', 'engine-banner-text')
+const engineBannerButton = el('div', 'button small primary', `Start ${brandIdentity.hubName}`)
+engineBannerButton.addEventListener('click', () => startEngineNow())
+engineBanner.append(el('span', 'dot'), engineBannerText, engineBannerButton)
+engineBanner.style.display = 'none'
+
+app.append(topbar, engineBanner, header, body, settingsPane, footer)
 
 let statusTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -609,6 +624,26 @@ function selectAwaitedRoot(catalog: Catalog): void {
 
 let engineStartAt = 0
 
+/** The Start button: asks right away, whatever the 20 s limit says. */
+function startEngineNow(): void {
+  engineStartAt = 0
+  void ensureEngine()
+  setStatus(`Starting ${brandIdentity.hubName}…`)
+  renderEngineBanner()
+}
+
+/** The banner over the library: only once we know the Hub isn't running. */
+function renderEngineBanner(): void {
+  const down = engineChecked && !!state.catalogPath && !engineRunning(state.engine)
+  show(engineBanner, down)
+  if (!down) return
+  const starting = Date.now() - engineStartAt < ENGINE_START_TIMEOUT_MS
+  const text = starting
+    ? `Starting ${brandIdentity.hubName}, the engine this panel needs…`
+    : `${brandIdentity.hubName} isn't running. It's the engine this panel needs: start it and keep it running in the background.`
+  if (engineBannerText.textContent !== text) engineBannerText.textContent = text
+}
+
 /** Starts the engine if it isn't running (at most every 20 s). */
 async function ensureEngine(): Promise<void> {
   if (engineRunning(state.engine) || Date.now() - engineStartAt < 20_000) return
@@ -646,11 +681,14 @@ function undoEdit(req: PanelRequest): void {
 }
 
 let engineWasRunning = false
+/** engine.json has been read at least once (so "not running" isn't shown before we know). */
+let engineChecked = false
 
 async function pollEngine(): Promise<void> {
   if (!state.catalogPath) return
   const status = await readEngineStatus(state.catalogPath)
   const running = engineRunning(status)
+  engineChecked = true
   const changed = status?.updatedAt !== state.engine?.updatedAt || running !== engineWasRunning
   engineWasRunning = running
   state.engine = status
@@ -670,17 +708,29 @@ async function pollEngine(): Promise<void> {
     setStatus(result.message, result.ok ? 'ok' : 'error')
   }
   // Requests nobody picked up.
+  const now = Date.now()
   for (const [id, pending] of state.pending) {
-    if (Date.now() - pending.at < REQUEST_TIMEOUT_MS || running) continue
+    if (running) {
+      // Carried out, but the result is gone (engine.json keeps the latest ones only). The
+      // catalog shows the outcome; just stop waiting.
+      if (now - pending.at > REQUEST_FORGET_MS) state.pending.delete(id)
+      continue
+    }
+    const deadline = Math.max(
+      pending.at + REQUEST_TIMEOUT_MS,
+      engineStartAt + ENGINE_START_TIMEOUT_MS
+    )
+    if (now < deadline) continue
     state.pending.delete(id)
     void removeRequest(state.catalogPath, id)
     undoEdit(pending.request)
     applyFilter(false)
     setStatus(
-      `${brandIdentity.hubName} isn't running, so that didn't go through. Start it in Settings.`,
+      `${brandIdentity.hubName} isn't running, so that didn't go through. Click Start ${brandIdentity.hubName} at the top and try again.`,
       'error'
     )
   }
+  renderEngineBanner()
   if (changed) {
     if (state.tab === 'settings') renderSettings()
     renderFooter()
@@ -797,11 +847,21 @@ async function importFiles(): Promise<void> {
     if (files.length === 0) return
     const target = importTarget()
     const count = files.length === 1 ? '1 file' : `${files.length} files`
-    const req: PanelRequest =
-      target.rootId === undefined
-        ? { type: 'import-files', files }
-        : { type: 'import-files', files, rootId: target.rootId, folder: target.folder ?? '' }
-    await request(req, `Importing ${count} into ${target.label}…`)
+    // The engine takes up to 500 files per request, so a big pick goes in several.
+    const batches = importBatches(files)
+    for (const [index, batch] of batches.entries()) {
+      const req: PanelRequest =
+        target.rootId === undefined
+          ? { type: 'import-files', files: batch }
+          : {
+              type: 'import-files',
+              files: batch,
+              rootId: target.rootId,
+              folder: target.folder ?? ''
+            }
+      const part = batches.length > 1 ? ` (part ${index + 1} of ${batches.length})` : ''
+      if ((await request(req, `Importing ${count} into ${target.label}…${part}`)) === null) break
+    }
   } catch (error) {
     setStatus(`Couldn't import: ${(error as Error).message}`, 'error')
   }
@@ -1705,12 +1765,12 @@ function checkRow(label: string, on: boolean, toggle: () => void): HTMLElement {
 function engineWords(): string {
   const engine = state.engine
   if (!engineRunning(engine))
-    return "Not running. Thumbnails, imports and edits wait until it's started."
+    return `Not running. ${brandIdentity.hubName} is the engine this panel needs: it finds your files and makes the previews. New files, imports and edits wait until it's started.`
   if ((engine?.indexing.rootIds.length ?? 0) > 0)
     return `Indexing ${(engine?.indexing.filesSeen ?? 0).toLocaleString()} files…`
   if (engine && engine.pendingMedia > 0)
     return `Making previews (${engine.pendingMedia.toLocaleString()} to go)`
-  return 'Running · Up to date'
+  return 'Running in the background, up to date. Keep it running while you edit.'
 }
 
 /**
@@ -1737,20 +1797,14 @@ function renderSettings(): void {
     settingsPane.textContent = ''
     settingsTexts.clear()
 
-    const engineBox = section('Engine')
+    const engineBox = section(`${brandIdentity.hubName} (the engine)`)
     const line = el('div', 'settings-line')
     const words = el('span', 'settings-text')
     settingsTexts.set('engine', words)
     line.append(el('span', `dot${running ? ' on' : ''}`), words)
     engineBox.append(line)
     if (!running)
-      engineBox.append(
-        button('Start engine', 'primary', () => {
-          engineStartAt = 0
-          void ensureEngine()
-          setStatus(`Starting ${brandIdentity.hubName}…`)
-        })
-      )
+      engineBox.append(button(`Start ${brandIdentity.hubName}`, 'primary', () => startEngineNow()))
     if (engine?.update) {
       const update = engine.update
       const row = el('div', 'settings-line')
@@ -1763,7 +1817,7 @@ function renderSettings(): void {
 
     const general = section('General')
     general.append(
-      checkRow('Start the engine when I log in', loginOn(), () => {
+      checkRow(`Start ${brandIdentity.hubName} when I log in (recommended)`, loginOn(), () => {
         const next = !loginOn()
         state.loginEdit = next
         renderSettings()

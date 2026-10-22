@@ -19,6 +19,7 @@
     "check": "pnpm typecheck && pnpm test",
     "postinstall": "electron-builder install-app-deps",
     "panel:bundle": "node scripts/prepare-panel.mjs",
+    "panels:release": "node scripts/build-panel-manifest.mjs",
     "dist:mac": "node scripts/prepare-panel.mjs && electron-vite build && electron-builder --mac --publish never",
     "dist:win": "node scripts/prepare-panel.mjs && electron-vite build && electron-builder --win --publish never"
   },

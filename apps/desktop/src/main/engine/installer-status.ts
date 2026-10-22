@@ -1,5 +1,7 @@
 import nodePath from 'path'
 import type { InstallerStatus } from '@shared/api'
+import type { CatalogStatus } from './panel-delivery'
+import type { PanelSource } from './panel-manifest'
 import type { PremiereInstall } from './panel-installer'
 import { CEP_EXTENSION_ID } from './uninstaller'
 
@@ -18,6 +20,14 @@ export interface InstallerStatusDeps {
   /** Null when Adobe's installer isn't on this computer. */
   inventory(): Promise<PremiereInstall[] | null>
   bundled(): { kind: 'cep' | 'uxp'; version: string }[]
+  /** The panel download list (fetched or cached). */
+  catalog(): Promise<CatalogStatus>
+  /** Where each build would come from, for these Premiere Pro versions. */
+  sources(
+    catalog: CatalogStatus,
+    premiere: readonly string[]
+  ): Record<'cep' | 'uxp', PanelSource | null>
+  otherProducts(catalog: CatalogStatus): { id: string; name: string }[]
   exists(path: string): boolean
   listDir(path: string): string[]
 }
@@ -73,8 +83,24 @@ export function cepExtensionCandidates(
 
 export async function installerStatus(deps: InstallerStatusDeps): Promise<InstallerStatus> {
   const { platform } = deps
-  const inventory = await deps.inventory().catch(() => null)
+  const [inventory, catalog] = await Promise.all([
+    deps.inventory().catch(() => null),
+    deps.catalog()
+  ])
   const bundled = deps.bundled()
+  const sources = deps.sources(
+    catalog,
+    (inventory ?? []).map((host) => host.version)
+  )
+  const available = (kind: 'cep' | 'uxp'): InstallerStatus['available']['cep'] => {
+    const source = sources[kind]
+    if (!source) return null
+    return {
+      version: source.version,
+      from: source.from,
+      size: source.from === 'download' ? source.panel.size : null
+    }
+  }
   const version = (kind: 'cep' | 'uxp'): string | null =>
     bundled.find((panel) => panel.kind === kind)?.version ?? null
   return {
@@ -84,6 +110,9 @@ export async function installerStatus(deps: InstallerStatusDeps): Promise<Instal
     adobeInstaller: inventory !== null,
     premiere: inventory ?? [],
     bundled: { cep: version('cep'), uxp: version('uxp') },
+    available: { cep: available('cep'), uxp: available('uxp') },
+    catalog: { state: catalog.state, message: catalog.message },
+    otherProducts: deps.otherProducts(catalog),
     locations: {
       premiereApps: premiereAppFolders(platform, deps.env, deps.listDir),
       cepExtensions: cepExtensionCandidates(platform, deps.env, deps.home).filter((path) =>

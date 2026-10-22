@@ -1,10 +1,12 @@
 # Product metadata model (documented, not built)
 
 A description of each Goated Panels product that a future distribution website, or the Goated Panels
-Hub, could read to list products and offer the right download. **Nothing here exists yet**: there is no
-website, API, feed, download server or update endpoint, and `goatedpanels.in` is not registered. Today
-the only network call is the optional update check against GitHub Releases
-(`apps/desktop/src/main/engine/update-check.ts`), and downloads are GitHub release assets.
+Hub, could read to list products and offer the right download. **Not built as described here**: there is
+no website, API, feed or download server, and `goatedpanels.in` is not registered. What exists today is
+the narrower panel download list (decision I4, `docs/releasing-panels.md`): the Hub reads
+`panels-manifest.json` from the `panels` GitHub Release when its window opens or a panel is installed, and the optional update
+check reads GitHub Releases (`apps/desktop/src/main/engine/update-check.ts`). Those are the only network
+calls.
 
 ## Fields
 
@@ -38,4 +40,5 @@ Rules for whoever builds this:
 - **Install screen:** the product card already shows name, mark and panel version from the branding
   module and `InstallerStatus`; a second product would be one more entry, not new code paths.
 - **Update check:** `update-check.ts` could read `update` from the metadata instead of GitHub's API, once
-  a real, owned endpoint exists. Until then GitHub stays the only network call allowed.
+  a real, owned endpoint exists. Until then GitHub (the update check and the panel download list) is
+  the only place the Hub contacts.

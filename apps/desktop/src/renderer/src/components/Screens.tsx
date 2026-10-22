@@ -11,7 +11,14 @@ import {
   Scale,
   Trash2
 } from 'lucide-react'
-import type { ExternalLink as LinkId, InstallerStatus, RevealTarget } from '@shared/api'
+import type {
+  EngineState,
+  ExternalLink as LinkId,
+  InstallerStatus,
+  RevealTarget
+} from '@shared/api'
+import { engineCopy, trayPlace } from '@shared/engine-copy'
+import { engineActivity } from '../hooks/useEngine'
 import {
   installState,
   PANEL_BUILD_IDS,
@@ -68,10 +75,13 @@ export function InstallScreen({
   manualVersion,
   onManualVersion,
   onRetry,
-  onReveal
+  onReveal,
+  justInstalled = false
 }: {
   status: InstallerStatus | null
   error: string | null
+  /** The last install succeeded: show what to do next. */
+  justInstalled?: boolean
   plan: InstallPlan
   app: HostApp
   onApp: (app: HostApp) => void
@@ -105,7 +115,10 @@ export function InstallScreen({
   const versions = detected.length > 0 ? detected : manualVersion ? [manualVersion] : []
   const manualBuild = manualVersion ? recommendedBuild(manualVersion) : null
   const recommended = detected.length > 0 ? plan.recommended : manualBuild ? [manualBuild] : []
-  const bundledVersion = status ? (status.bundled.uxp ?? status.bundled.cep) : null
+  const shownVersion = status
+    ? (status.available.uxp?.version ?? status.available.cep?.version ?? null)
+    : null
+  const catalog = status?.catalog
 
   let statusText = 'Checking what’s installed…'
   let tone: SummaryTone = 'neutral'
@@ -113,7 +126,8 @@ export function InstallScreen({
   else if (status && plan.installed.length > 0) {
     const outdated = plan.installed.some(
       (panel) =>
-        installState([panel], panel.build, status.bundled[panel.build]) === 'update-available'
+        installState([panel], panel.build, status.available[panel.build]?.version ?? null) ===
+        'update-available'
     )
     statusText = `${outdated ? 'Update available. ' : ''}Installed: ${describeInstalled(plan.installed)}`
     tone = outdated ? 'warn' : 'ok'
@@ -123,8 +137,41 @@ export function InstallScreen({
     <>
       <ApplicationSelector value={app} onChange={onApp} />
       <div className="mt-4">
-        <ProductSummary app={app} version={bundledVersion} statusText={statusText} tone={tone} />
+        <ProductSummary app={app} version={shownVersion} statusText={statusText} tone={tone} />
       </div>
+      {justInstalled && (
+        <div className="mt-3">
+          <CompatibilityNotice tone="info">
+            <p className="font-medium text-ink">Installed. Next:</p>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-5">
+              <li>Quit and reopen Premiere Pro.</li>
+              <li>
+                Open the panel: Window → Extensions → {brand.productName} (Premiere Pro 2024 to
+                2026) or Window → UXP Plugins → {brand.productName} (2027 and later).
+              </li>
+              <li>{engineCopy.afterInstall}</li>
+            </ol>
+          </CompatibilityNotice>
+        </div>
+      )}
+      {status && catalog && (catalog.state === 'offline' || catalog.state === 'invalid') && (
+        <div className="mt-3">
+          <CompatibilityNotice tone="info">
+            <p>
+              {catalog.state === 'offline'
+                ? "You're offline, so newer panel versions can't be checked."
+                : (catalog.message ?? "The panel download list couldn't be read.")}{' '}
+              {status.bundled.cep || status.bundled.uxp
+                ? `Install uses the panel built into ${brand.hubName}.`
+                : ''}
+            </p>
+            <button type="button" onClick={onRetry} className={`${buttonClass('quiet')} mt-2`}>
+              <RefreshCw {...ICON} />
+              Check again
+            </button>
+          </CompatibilityNotice>
+        </div>
+      )}
 
       <div className="mt-4">
         {error ? (
@@ -197,7 +244,7 @@ export function InstallScreen({
               recommended={recommended.includes(build)}
               versions={versions}
               installed={plan.installed}
-              bundledVersion={status?.bundled[build] ?? null}
+              source={status?.available[build] ?? null}
               onSelect={() =>
                 onChoice(
                   recommended.length === 1 && recommended[0] === build ? 'recommended' : build
@@ -207,6 +254,22 @@ export function InstallScreen({
           ))}
         </div>
       </Section>
+
+      {status && status.otherProducts.length > 0 && (
+        <Section title={`More from ${brand.brandName}`}>
+          <ul className="divide-y divide-line rounded-lg border border-line bg-panel">
+            {status.otherProducts.map((product) => (
+              <li key={product.id} className="flex items-center gap-3 px-3.5 py-3 text-sm">
+                <Package {...ICON} className="text-ink-2" />
+                <span className="font-medium text-ink">{product.name}</span>
+                <span className="ml-auto text-xs text-ink-3">
+                  Needs a newer version of {brand.hubName}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
 
       {status && (
         <Section title="Where it goes">
@@ -277,10 +340,14 @@ export function ManageScreen({
   onUninstallApp,
   onGoInstall,
   onRetry,
-  onReveal
+  onReveal,
+  engine,
+  onStartAtLogin
 }: {
   status: InstallerStatus | null
   error: string | null
+  engine: EngineState | null
+  onStartAtLogin: (enabled: boolean) => void
   installed: InstalledPanel[]
   busy: boolean
   onUpdate: (build: PanelBuild) => void
@@ -292,6 +359,7 @@ export function ManageScreen({
 }): React.JSX.Element {
   return (
     <>
+      <EngineSection engine={engine} platform={status?.platform} onStartAtLogin={onStartAtLogin} />
       <Section
         title="Installed panels"
         aside={
@@ -322,7 +390,7 @@ export function ManageScreen({
         ) : (
           <ul className="divide-y divide-line rounded-lg border border-line bg-panel">
             {installed.map((panel) => {
-              const bundled = status.bundled[panel.build]
+              const bundled = status.available[panel.build]?.version ?? null
               const state = installState([panel], panel.build, bundled)
               const cepFolder =
                 panel.build === 'cep' ? status.locations.cepExtensions[0] : undefined
@@ -446,6 +514,49 @@ function LinkButton({
   )
 }
 
+/** The background engine: what it is, that it's on, and the start-at-login switch. */
+function EngineSection({
+  engine,
+  platform,
+  onStartAtLogin
+}: {
+  engine: EngineState | null
+  platform: string | undefined
+  onStartAtLogin: (enabled: boolean) => void
+}): React.JSX.Element {
+  const id = useId()
+  return (
+    <Section title="Background engine">
+      <div className="rounded-lg border border-line bg-panel px-3.5 py-3 text-sm">
+        <p className="flex items-center gap-2 text-ink">
+          <span aria-hidden className="size-2 rounded-full bg-success" />
+          {engineCopy.runningTitle}
+          {engineActivity(engine) && <span className="text-ink-3">({engineActivity(engine)})</span>}
+        </p>
+        <p className="mt-1 text-ink-2">
+          The {brand.productName} panel in Premiere Pro gets your library from {brand.hubName}: it
+          finds your files and makes the previews. Keep it running while you edit. It lives in the{' '}
+          {trayPlace(platform ?? 'darwin')}; quit it from there.
+        </p>
+        <div className="mt-3 flex items-start gap-2.5">
+          <input
+            id={id}
+            type="checkbox"
+            className="mt-0.5 size-4 accent-brand-500"
+            checked={engine?.startAtLogin ?? false}
+            disabled={!engine}
+            onChange={(event) => onStartAtLogin(event.target.checked)}
+          />
+          <label htmlFor={id}>
+            <span className="text-ink">{engineCopy.startAtLoginLabel}</span>
+            <span className="block text-xs text-ink-3">{engineCopy.startAtLoginHint}</span>
+          </label>
+        </div>
+      </div>
+    </Section>
+  )
+}
+
 export function AboutScreen({
   status,
   onLink
@@ -461,7 +572,8 @@ export function AboutScreen({
         <div>
           <h1 className="text-lg font-semibold text-ink">{brand.hubName}</h1>
           <p className="text-sm text-ink-2">
-            Installs {brand.productName} into Premiere Pro and runs it in the background.
+            Installs {brand.productName} into Premiere Pro, and runs in the background as the engine
+            the panel needs.
           </p>
         </div>
       </div>
@@ -502,7 +614,8 @@ export function HelpScreen({ onLink }: { onLink: (link: LinkId) => void }): Reac
     'On Install, keep Premiere Pro selected.',
     'Leave the recommended method selected: CEP for Premiere Pro 2024 to 2026, UXP for 2027 and later.',
     'Click Install Asset Library and wait for the confirmation.',
-    'Restart Premiere Pro, then open the panel: Window → Extensions → Asset Library (CEP) or Window → UXP Plugins → Asset Library (UXP).'
+    'Restart Premiere Pro, then open the panel: Window → Extensions → Asset Library (CEP) or Window → UXP Plugins → Asset Library (UXP).',
+    `Keep ${brand.hubName} running in the background. It's the engine the panel needs; closing its window doesn't stop it.`
   ]
   const problems = [
     {
@@ -514,8 +627,8 @@ export function HelpScreen({ onLink }: { onLink: (link: LinkId) => void }): Reac
       text: `${brand.hubName} installs the panel through the Creative Cloud app. Install or update Creative Cloud, then click Check again.`
     },
     {
-      title: 'The panel says the engine isn’t running',
-      text: `Open ${brand.hubName}. It keeps running in the background (look for its icon in the menu bar or notification area) to index your folders.`
+      title: `The panel says ${brand.hubName} isn’t running`,
+      text: `Click Start ${brand.hubName} in the panel, or open ${brand.hubName} from Applications (Start menu on Windows). It then keeps running in the background, with its icon in the menu bar or notification area. Turn on "${engineCopy.startAtLoginLabel}" in Manage so it's always ready.`
     },
     {
       title: 'Installing failed',
@@ -524,7 +637,7 @@ export function HelpScreen({ onLink }: { onLink: (link: LinkId) => void }): Reac
   ]
   return (
     <>
-      <Section title="Install in four steps">
+      <Section title="Install in five steps">
         <ol className="space-y-2 text-sm text-ink-2">
           {steps.map((step, index) => (
             <li key={step} className="flex gap-3">

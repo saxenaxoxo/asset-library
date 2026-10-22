@@ -14,7 +14,12 @@ installed, and uninstalls cleanly. It then keeps running in the background to in
 (It used to be called Asset Library. The first time Goated Panels Hub opens, it moves your library and
 settings over from the old app and replaces it.)
 
-- **Local and private.** No account, no cloud, no telemetry. Works offline.
+- **Local and private.** No account, no cloud, no telemetry. Works offline. The only network
+  requests are the optional daily update check and reading the list of panel downloads when you open
+  the Hub window or install a panel (plus the panel download itself).
+- **Panels update without a new app.** The Hub carries the Premiere Pro panel, and downloads a newer
+  one when there is one, checking its SHA-256 fingerprint before installing it. See
+  [docs/releasing-panels.md](docs/releasing-panels.md).
 - **Your files stay put.** Asset Library never moves, renames, changes or deletes your files.
 - **macOS and Windows.** Apple Silicon, Intel and Windows x64.
 

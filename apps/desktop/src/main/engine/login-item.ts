@@ -3,13 +3,17 @@ import { BACKGROUND_FLAG } from './launch'
 import type { LoginItem } from './settings'
 
 /**
- * The operating system's "open at login" entry. Only installed builds touch it: in development
- * it would register the bare Electron binary, and test runs set ASSET_LIBRARY_NO_LOGIN_ITEM so
- * they never add the app being tested to the developer's login items.
+ * The operating system's "open at login" entry. Only the installed copy touches it: in
+ * development it would register the bare Electron binary, a stray build (dist folder, disk image)
+ * would take the login item over, and test runs set ASSET_LIBRARY_NO_LOGIN_ITEM so they never add
+ * the app being tested to the developer's login items.
  */
-export function electronLoginItem(platform: NodeJS.Platform = process.platform): LoginItem {
+export function electronLoginItem(
+  installed: boolean,
+  platform: NodeJS.Platform = process.platform
+): LoginItem {
   const active =
-    app.isPackaged &&
+    installed &&
     !process.env['ASSET_LIBRARY_NO_LOGIN_ITEM'] &&
     (platform === 'darwin' || platform === 'win32')
   // Windows starts the app at login with --background, so it opens without a window. macOS

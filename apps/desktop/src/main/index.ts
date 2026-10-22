@@ -27,14 +27,25 @@ import { electronLoginItem, openedAtLogin } from './engine/login-item'
 import { EngineTray } from './engine/tray'
 import { AudioPlayer } from './engine/audio-player'
 import { PanelInstaller, type UpiaRun } from './engine/panel-installer'
+import { PanelDelivery } from './engine/panel-delivery'
+import { ASSET_LIBRARY_PRODUCT_ID } from './engine/panel-manifest'
+import { electronHttpGet } from './engine/electron-http'
 import { UpdateChecker } from './engine/update-check'
 import { cepExtensionFolder, macAppBundle, Uninstaller } from './engine/uninstaller'
 import { prepareDataFolder } from './engine/data-folder'
 import { legacyMacApps } from './engine/legacy-install'
-import { isAllowedExternalUrl } from './security-rules'
+import { installedCopyToHandOver, isInstalledCopy, type CopyFacts } from './engine/installed-copy'
+import {
+  isAllowedDownloadRedirect,
+  isAllowedDownloadUrl,
+  isAllowedExternalUrl,
+  loopbackTestOrigin,
+  PANEL_MANIFEST_URL
+} from './security-rules'
 import { CatalogPublisher, readCatalogSnapshot } from './catalog/writer'
 import { workerCatalogPublishing } from './catalog/publishing'
 import { AUDIO_PAGE } from '@shared/audio-preview'
+import { engineCopy } from '@shared/engine-copy'
 import {
   BACKGROUND_FLAG,
   ENGINE_SCHEME,
@@ -51,11 +62,39 @@ const rendererFileUrlPrefix = pathToFileURL(RENDERER_INDEX).href
 
 registerAssetScheme()
 
+/** Set once quitting has begun, so closing windows on the way out isn't "closed by the editor". */
+let quitting = false
+/** Called when the editor closes the window and the engine keeps running. Set once ready. */
+let onWindowClosedByEditor: () => void = () => {}
+
 /** Opens the installer window. The Dock icon goes away with it (the engine keeps running). */
 function openMainWindow(): void {
   createMainWindow(devServerUrl).on('closed', () => {
     if (!mainWindow()) app.dock?.hide()
+    if (!quitting) onWindowClosedByEditor()
   })
+}
+
+/**
+ * Quitting stops the engine the Premiere panel relies on, so the menu-bar Quit and Cmd+Q ask
+ * first. (Logging out or shutting down doesn't come through here and isn't held up.)
+ */
+async function confirmQuit(): Promise<void> {
+  app.focus({ steal: true })
+  const options: Electron.MessageBoxOptions = {
+    type: 'question',
+    message: engineCopy.quitMessage,
+    detail: engineCopy.quitDetail,
+    buttons: [engineCopy.quitConfirm, engineCopy.quitCancel],
+    defaultId: 1,
+    cancelId: 1
+  }
+  // Over the window when it's open (a sheet on macOS), else on its own.
+  const window = mainWindow()
+  const { response } = await (window
+    ? dialog.showMessageBox(window, options)
+    : dialog.showMessageBox(options))
+  if (response === 0) app.quit()
 }
 
 /** Shows the installer window (creating it if it was closed) and, on macOS, the Dock icon. */
@@ -72,12 +111,16 @@ function showWindow(): void {
 }
 
 /** Runs a program with an argument array (no shell) and collects its output. Never rejects. */
-function runProgram(file: string, args: string[]): Promise<UpiaRun> {
+function runProgram(
+  file: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env
+): Promise<UpiaRun> {
   return new Promise((resolve) => {
     execFile(
       file,
       args,
-      { timeout: 120_000, windowsHide: true, maxBuffer: 1024 * 1024 },
+      { timeout: 120_000, windowsHide: true, maxBuffer: 1024 * 1024, env },
       (error, stdout, stderr) => resolve({ ok: !error, output: `${stdout ?? ''}\n${stderr ?? ''}` })
     )
   })
@@ -90,6 +133,18 @@ function handleEngineUrl(url: string): void {
 
 // The data folder was "Asset Library" before the rename; move it before anything opens it.
 const dataFolder = prepareDataFolder()
+
+// Only the installed copy claims assetlibrary://, the login item and Premiere's panel; a build
+// elsewhere (dist folder, disk image) started by the panel hands over to the installed one.
+const copyFacts: CopyFacts = {
+  platform: process.platform,
+  packaged: app.isPackaged,
+  execPath: process.execPath,
+  home: homedir(),
+  productName: app.getName(),
+  exists: existsSync
+}
+const installedCopy = isInstalledCopy(copyFacts)
 
 // One running instance. The app runs as a background engine for the Premiere panel; a second
 // launch shows the window, unless it's the panel starting the engine or a login start.
@@ -113,6 +168,21 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
+    // Test runs launch dist builds on purpose (they set ASSET_LIBRARY_NO_LOGIN_ITEM).
+    const handOver = process.env['ASSET_LIBRARY_NO_LOGIN_ITEM']
+      ? null
+      : installedCopyToHandOver(copyFacts)
+    if (
+      handOver &&
+      startsInBackground({ argv: process.argv, openedAtLogin: openedAtLogin(), url: launchUrl })
+    ) {
+      console.info(`Not the installed copy; starting ${handOver} instead.`)
+      app.releaseSingleInstanceLock()
+      const args = launchUrl ? [launchUrl] : ['--args', BACKGROUND_FLAG]
+      spawn('/usr/bin/open', ['-a', handOver, ...args], { detached: true, stdio: 'ignore' }).unref()
+      app.quit()
+      return
+    }
     electronApp.setAppUserModelId(APP_ID)
     nativeTheme.themeSource = 'dark'
     applySecurityPolicies()
@@ -134,7 +204,7 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
     } catch (error) {
       // Without this the app would sit in the Dock with no window and no explanation.
       dialog.showErrorBox(
-        "Asset Library couldn't open your library",
+        `${brandIdentity.hubName} couldn't open your library`,
         `${(error as Error).message}\n\nYour files are untouched. The library is stored in:\n${dbFile}`
       )
       app.exit(1)
@@ -156,9 +226,12 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
     const importsFolder = join(app.getPath('videos'), `${brandIdentity.primaryProductName} Imports`)
     const settings = new SettingsStore(
       join(app.getPath('userData'), 'settings.json'),
-      electronLoginItem()
+      electronLoginItem(installedCopy)
     )
-    settings.init({ reapplyLoginItem: dataFolder.moved })
+    settings.init({
+      reapplyLoginItem: dataFolder.moved,
+      trustLoginItem: !dataFolder.moveUnfinished
+    })
     handleAssetProtocol(repo, mediaDir)
     const appVersion = app.getVersion()
     // The catalog is built and written in the utility process (it's big for big libraries).
@@ -187,16 +260,39 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       record: (at, latest) => settings.recordUpdateCheck(at, latest),
       onChange: () => void status?.write()
     })
+    // Automated tests replace Adobe's installer with a Node script (never the real one).
+    const testUpia = process.env['ASSET_LIBRARY_TEST_UPIA'] || null
     const panelInstaller = new PanelInstaller({
       platform: process.platform,
       env: process.env,
       resourcesDir: app.isPackaged ? process.resourcesPath : null,
       // The panel is the product: Adobe's installer knows it as Asset Library, whatever the app's name.
       panelName: brandIdentity.primaryProductName,
-      run: runProgram,
+      run: testUpia
+        ? (file, args) =>
+            runProgram(process.execPath, [file, ...args], {
+              ...process.env,
+              ELECTRON_RUN_AS_NODE: '1'
+            })
+        : (file, args) => runProgram(file, args),
       exists: existsSync,
-      listFiles: (dir) => readdirSync(dir)
+      listFiles: (dir) => readdirSync(dir),
+      agentPath: testUpia
     })
+    // Newer panels are downloaded (and verified) from the manifest when the Hub window asks;
+    // the copy built into the app is the offline fallback. Tests serve the manifest locally.
+    const testManifestUrl = process.env['ASSET_LIBRARY_TEST_MANIFEST_URL']
+    const testOrigin = loopbackTestOrigin(testManifestUrl)
+    const panelDelivery = new PanelDelivery({
+      productId: ASSET_LIBRARY_PRODUCT_ID,
+      manifestUrl: testOrigin && testManifestUrl ? testManifestUrl : PANEL_MANIFEST_URL,
+      http: electronHttpGet,
+      isAllowedUrl: (url) => isAllowedDownloadUrl(url, testOrigin),
+      isAllowedRedirect: (url) => isAllowedDownloadRedirect(url, testOrigin),
+      downloadsDir: join(app.getPath('userData'), 'downloads'),
+      installer: panelInstaller
+    })
+    void panelDelivery.cleanUp().catch(() => undefined)
     const audio = new AudioPlayer(
       devServerUrl
         ? new URL(AUDIO_PAGE, devServerUrl).href
@@ -255,7 +351,7 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
     const installPanel = async (): Promise<void> => {
       installingPanel = true
       refreshTray()
-      const result = await panelInstaller.install()
+      const result = await panelDelivery.install()
       installingPanel = false
       refreshTray()
       // In the background the engine has no window; bring the answer to the front.
@@ -263,18 +359,21 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       void dialog.showMessageBox({
         type: result.ok ? 'info' : 'warning',
         message: result.ok ? 'Premiere Pro panel installed' : "The panel wasn't installed",
-        detail: result.message
+        detail: result.ok ? `${result.message}\n\n${engineCopy.afterInstall}` : result.message
       })
     }
     const tray = new EngineTray(productName, {
       openWindow: showWindow,
-      setStartAtLogin,
+      setStartAtLogin: (enabled) => {
+        setStartAtLogin(enabled)
+        refreshTray()
+      },
       installPanel: () => void installPanel(),
       openUpdate: (url) => {
         if (isAllowedExternalUrl(url)) void shell.openExternal(url)
       },
       uninstall: () => void uninstaller.run(),
-      quit: () => app.quit()
+      quit: () => void confirmQuit()
     })
     refreshTray()
 
@@ -295,7 +394,7 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
           type: 'warning',
           message: `Uninstall ${productName}?`,
           detail: [
-            `This removes the ${productName} panel from Premiere Pro, stops ${productName} from starting at login, and ${windows ? 'runs its uninstaller' : 'moves the app to the Trash'}.`,
+            `This removes the ${brandIdentity.primaryProductName} panel from Premiere Pro, stops ${productName} from starting at login, and ${windows ? 'runs its uninstaller' : `moves ${productName} to the Trash`}. The panel stops working without it.`,
             'Your own asset files are never touched.'
           ].join('\n\n'),
           checkboxLabel: 'Also delete my library: folder list, tags, favorites and thumbnails',
@@ -308,7 +407,7 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       },
       removePanels: () => panelInstaller.removeAll(),
       forgetSystemEntries: () => {
-        electronLoginItem().set(false)
+        electronLoginItem(app.isPackaged).set(false)
         if (app.isPackaged) app.removeAsDefaultProtocolClient(ENGINE_SCHEME)
       },
       stopEngine: async () => {
@@ -330,7 +429,21 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       },
       exit: () => app.exit(0)
     })
-    applyAppMenu(process.platform, productName, { uninstall: () => void uninstaller.run() })
+    applyAppMenu(process.platform, productName, {
+      uninstall: () => void uninstaller.run(),
+      quit: () => void confirmQuit()
+    })
+    // The first time the editor closes the window, say that the engine is still on, and where.
+    onWindowClosedByEditor = () => {
+      if (settings.backgroundNoteShown) return
+      settings.recordBackgroundNoteShown()
+      void dialog.showMessageBox({
+        type: 'info',
+        message: engineCopy.closedMessage,
+        detail: engineCopy.closedDetail(process.platform),
+        buttons: ['OK']
+      })
+    }
     engineStatus.onStatus((current) => {
       trayLine = statusLine(current)
       refreshTray()
@@ -338,7 +451,6 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
 
     // Quitting removes engine.json, so the panel shows "not running" at once. The status write
     // in progress (if any) is awaited first, or it would put the file back.
-    let quitting = false
     app.on('before-quit', (event) => {
       if (quitting) return
       quitting = true
@@ -365,7 +477,7 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       isTrustedSenderUrl(event.senderFrame?.url, devServerUrl, rendererFileUrlPrefix)
     registerIpcHandlers(trustedSender, { db, worker, binaries })
     registerInstallerHandlers(trustedSender, {
-      status: () =>
+      status: (refresh) =>
         installerStatus({
           platform: process.platform,
           env: process.env,
@@ -376,6 +488,9 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
           cacheDir: mediaDir,
           inventory: () => panelInstaller.inventory(),
           bundled: () => panelInstaller.bundled(),
+          catalog: () => panelDelivery.catalog(refresh),
+          sources: (catalog, premiere) => panelDelivery.sources(catalog, premiere),
+          otherProducts: (catalog) => panelDelivery.otherProducts(catalog),
           exists: existsSync,
           listDir: (dir) => readdirSync(dir)
         }),
@@ -383,18 +498,30 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
         installingPanel = true
         refreshTray()
         try {
-          return await panelInstaller.install(builds)
+          return await panelDelivery.install(builds)
         } finally {
           installingPanel = false
           refreshTray()
         }
       },
+      progress: () => panelDelivery.progress(),
+      cancel: () => panelDelivery.cancel(),
       remove: (builds) => panelInstaller.removeAll(builds),
-      uninstall: () => void uninstaller.run()
+      uninstall: () => void uninstaller.run(),
+      engine: () => ({
+        running: true,
+        line: trayLine,
+        startAtLogin: settings.settings.startAtLogin
+      }),
+      setStartAtLogin: (enabled) => {
+        setStartAtLogin(enabled)
+        refreshTray()
+      }
     })
-    // Installed builds claim assetlibrary:// (macOS also learns it from Info.plist). In
-    // development the bare Electron binary would be registered instead, so it's skipped.
-    if (app.isPackaged) app.setAsDefaultProtocolClient(ENGINE_SCHEME)
+    // The installed copy claims assetlibrary:// (macOS also learns it from Info.plist). In
+    // development the bare Electron binary would be registered instead, and a stray build would
+    // take the panel's start link over, so both are skipped.
+    if (installedCopy) app.setAsDefaultProtocolClient(ENGINE_SCHEME)
     // The app as installed before the rename has the same bundle ID, so macOS could open it for
     // assetlibrary:// links or at login. Its data has moved here; the old app goes to the Trash.
     if (app.isPackaged && process.platform === 'darwin' && dataFolder.realInstall) {
@@ -439,7 +566,7 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
     engineStatus.start()
     // Installed builds only: development and test runs never reach the network or Premiere.
     if (app.isPackaged && !process.env['ASSET_LIBRARY_NO_UPDATE_CHECK']) updates.start()
-    if (app.isPackaged && !process.env['ASSET_LIBRARY_NO_PANEL_INSTALL']) {
+    if (installedCopy && !process.env['ASSET_LIBRARY_NO_PANEL_INSTALL']) {
       // First launch of a new build: put its panel into Premiere Pro, replacing older copies.
       void panelInstaller
         .installIfNeeded(settings.panelAutoInstalled, (version) =>

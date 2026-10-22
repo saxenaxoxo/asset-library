@@ -116,7 +116,12 @@ export class Uninstaller {
       // when asked to (--delete-app-data).
       const uninstaller = windowsUninstaller(d.execPath, d.productName)
       if (d.exists(uninstaller)) {
-        d.launch(uninstaller, choice.deleteData ? ['--delete-app-data'] : [])
+        // The editor already answered "delete my library?"; the uninstaller mustn't ask again.
+        d.launch(uninstaller, [choice.deleteData ? '--delete-app-data' : '--keep-app-data'])
+        // It can't show what went wrong in here, so say it before handing over.
+        if (problems.length > 0) {
+          await d.tell('warning', `${d.productName} was partly removed`, problems.join('\n\n'))
+        }
       } else {
         await d.tell(
           'warning',
@@ -132,11 +137,14 @@ export class Uninstaller {
     }
 
     if (choice.deleteData) {
+      // Looked at first: once the data is gone, the old-name link points nowhere and no longer
+      // "exists", yet it's still there.
+      const legacyThere = d.exists(d.legacyDataDir)
       await d.trash(d.dataDir).catch(() => {
         problems.push(`Couldn't move your library data to the Trash. It's in ${d.dataDir}.`)
       })
       // Trashing the link moves only the link; the data it pointed at went just above.
-      if (d.exists(d.legacyDataDir)) await d.trash(d.legacyDataDir).catch(() => undefined)
+      if (legacyThere) await d.trash(d.legacyDataDir).catch(() => undefined)
     }
     const bundle = macAppBundle(d.execPath)
     const appTrashed = bundle
