@@ -59,15 +59,16 @@ export const brand: BrandConfig = {
   },
   colors: {
     accent: {
-      '200': '#DDD6FE',
-      '300': '#C4B5FD',
-      '400': '#A78BFA',
-      '500': '#8B5CF6',
-      '600': '#7C3AED',
-      '700': '#6D28D9'
+      '200': '#EEFFC2',
+      '300': '#DDFF8A',
+      '400': '#D2FF66',
+      '500': '#C6FF3D',
+      '600': '#B4F01F',
+      '700': '#8FC414'
     },
-    onAccent: '#FFFFFF',
-    accentSurface: '#1C1A24'
+    // Acid lime is very light, so text and icons on it are near-black.
+    onAccent: '#0B0B0D',
+    accentSurface: '#1A1F10'
   },
   links: brandLinks
 }

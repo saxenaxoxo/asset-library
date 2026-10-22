@@ -54,8 +54,9 @@ Flat shapes only: no 3D, gradients, shadows or glows.
 | Role      | Colour    | Notes                                                |
 | --------- | --------- | ---------------------------------------------------- |
 | Charcoal  | `#17161C` | Mark details, one-colour mark on light backgrounds   |
-| Surface   | `#1C1A24` | App icon tile (`accentSurface`)                      |
-| Purple    | `#8B5CF6` | Accent (`accent.500`): the horns, the primary button |
+| Surface   | `#1A1F10` | Selected rows and highlights (`accentSurface`)       |
+| Lime      | `#C6FF3D` | Accent (`accent.500`): the horns, the primary button |
+| On lime   | `#0B0B0D` | Text and icons on the accent (`onAccent`)            |
 | Off-white | `#F4F2EE` | Text and the mark's panel on dark backgrounds        |
 
 The wordmarks set their text in Geist (bundled with the app) with system fallbacks, so they render

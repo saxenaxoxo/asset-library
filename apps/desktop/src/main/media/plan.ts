@@ -196,7 +196,7 @@ export function mediaPlan(asset: MediaPlanInput): MediaJob[] {
         '-i',
         input,
         '-filter_complex',
-        'aformat=channel_layouts=mono,showwavespic=s=960x160:colors=0xA78BFA',
+        'aformat=channel_layouts=mono,showwavespic=s=960x160:colors=0xC6FF3D',
         '-frames:v',
         '1',
         wave

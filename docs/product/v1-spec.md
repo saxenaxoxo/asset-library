@@ -92,7 +92,7 @@ in `extraResources` (BtbN lgpl for Windows; self-built LGPL for macOS in CI). De
 
 ## 5. UI
 
-Dark, charcoal surfaces, purple accent (`#8B5CF6`, ramp 200–700) + white. Layout: sidebar · top bar
+Dark, charcoal surfaces, acid lime accent (`#C6FF3D`, ramp 200–700) with near-black text on lime. Layout: sidebar · top bar
 (search, filters, sort, view toggle, rescan) · virtualized grid · details panel (large preview, metadata,
 tags, favorite, notes, Reveal, Copy path, drag handle) · status bar (scan/media progress).
 Keyboard: arrows, Space = preview, Enter = reveal, Cmd/Ctrl+F = search, F = favorite.

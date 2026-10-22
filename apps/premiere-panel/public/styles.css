@@ -1,5 +1,5 @@
 /* Asset Library panel. UXP has no CSS Grid, so layout is flexbox + absolute positioning only.
-   Colours mirror packages/branding (purple accent on graphite). */
+   Colours mirror packages/branding (acid lime accent on graphite). */
 :root {
   --canvas: #121216;
   --panel: #17171c;
@@ -9,12 +9,13 @@
   --ink: #eeedf3;
   --ink-2: #a3a1b3;
   --ink-3: #6e6c7e;
-  --brand-200: #ddd6fe;
-  --brand-300: #c4b5fd;
-  --brand-400: #a78bfa;
-  --brand-500: #8b5cf6;
-  --brand-600: #7c3aed;
-  --brand-surface: #1c1a24;
+  --brand-200: #eeffc2;
+  --brand-300: #ddff8a;
+  --brand-400: #d2ff66;
+  --brand-500: #c6ff3d;
+  --brand-600: #b4f01f;
+  --brand-surface: #1a1f10;
+  --brand-on-accent: #0b0b0d;
   --danger: #f07178;
 }
 
@@ -358,6 +359,7 @@ body {
 
 .play:hover {
   background: var(--brand-600);
+  color: var(--brand-on-accent);
 }
 
 /* Preview-making progress in the footer. */
@@ -463,7 +465,7 @@ body {
 }
 
 .badge.alpha {
-  background: rgba(28, 26, 36, 0.92);
+  background: rgba(26, 31, 16, 0.92);
   color: var(--brand-200);
 }
 
@@ -593,7 +595,7 @@ body {
 .button.primary {
   background: var(--brand-600);
   border-color: var(--brand-600);
-  color: #ffffff;
+  color: var(--brand-on-accent);
 }
 
 .button.primary:hover {
@@ -768,6 +770,7 @@ body {
 .checkbox.on {
   background: var(--brand-600);
   border-color: var(--brand-600);
+  color: var(--brand-on-accent);
 }
 
 .button.disabled {

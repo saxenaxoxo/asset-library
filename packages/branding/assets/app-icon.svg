@@ -3,9 +3,9 @@
        mark on near-black with a soft glow behind the lit tile. Replace this file to rebrand, then
        run `pnpm icons` to regenerate build/icon.png. -->
   <defs>
-    <radialGradient id="bg" cx="0.5" cy="0.45" r="0.62"><stop offset="0" stop-color="#16123C"/><stop offset="0.6" stop-color="#0B0A14"/><stop offset="1" stop-color="#070709"/></radialGradient>
+    <radialGradient id="bg" cx="0.5" cy="0.45" r="0.62"><stop offset="0" stop-color="#171A10"/><stop offset="0.6" stop-color="#0B0C09"/><stop offset="1" stop-color="#070709"/></radialGradient>
     <linearGradient id="top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E8E8EF"/></linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B07BFF"/><stop offset="1" stop-color="#4F38FF"/></linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DDFF8A"/><stop offset="1" stop-color="#A3DB1F"/></linearGradient>
     <linearGradient id="mid" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#71717D"/><stop offset="1" stop-color="#4C4C57"/></linearGradient>
     <linearGradient id="dark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#40404A"/><stop offset="1" stop-color="#2C2C33"/></linearGradient>
     <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="38"/></filter>
@@ -13,7 +13,7 @@
   </defs>
   <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
   <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.06"/>
-  <g clip-path="url(#tile)"><rect x="277.0" y="456.8" width="294.1" height="125.7" rx="18.4" fill="#6D46FF" opacity="0.55" filter="url(#glow)"/></g>
+  <g clip-path="url(#tile)"><rect x="277.0" y="456.8" width="294.1" height="125.7" rx="18.4" fill="#C6FF3D" opacity="0.55" filter="url(#glow)"/></g>
   <rect x="277.0" y="327.8" width="470.0" height="96.3" rx="18.4" fill="url(#top)"/>
   <rect x="277.0" y="456.8" width="294.1" height="125.7" rx="18.4" fill="url(#accent)"/>
   <rect x="597.9" y="456.8" width="149.1" height="125.7" rx="18.4" fill="url(#mid)"/>
