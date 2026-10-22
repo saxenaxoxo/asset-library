@@ -77,5 +77,6 @@ they have no `package.json` and aren't listed in `pnpm-workspace.yaml`.
 
 ## License
 
-Copyright © 2026 Goated Panels. All rights reserved. Asset Library is free to download and use,
-but the source code is not open source. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Asset Library is open source under the [MIT License](LICENSE). Copyright © 2026 Aryan Saxena.
+Third-party components keep their own licences; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The names "Goated Panels" and "Asset Library" and their logos are not covered by the licence.

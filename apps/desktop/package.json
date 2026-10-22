@@ -7,7 +7,7 @@
   "main": "./out/main/index.js",
   "author": "Goated Panels",
   "homepage": "https://github.com/saxenaxoxo/asset-library",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev --watch",
     "start": "electron-vite preview",

@@ -2,7 +2,7 @@
   "name": "asset-library-workspace",
   "private": true,
   "description": "Asset Library by Goated Panels: Goated Panels Hub (desktop app), Premiere Pro panel and shared branding.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "dev": "pnpm --filter asset-library dev",
     "build": "pnpm --filter asset-library build",
