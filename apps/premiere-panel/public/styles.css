@@ -126,6 +126,12 @@ body {
   font-size: 12px;
 }
 
+.search:focus {
+  outline: 1px solid var(--brand-500);
+  outline-offset: 0;
+  border-color: var(--brand-500);
+}
+
 .body {
   flex: 1;
   display: flex;
