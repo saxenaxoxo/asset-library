@@ -44,8 +44,8 @@ mac:
   identity: '-'
   entitlements: build/entitlements.mac.plist
   extraResources:
-    - from: ../../THIRD_PARTY_NOTICES.md
-      to: THIRD_PARTY_NOTICES.md
+    - from: ../../THIRD-PARTY-NOTICES.md
+      to: THIRD-PARTY-NOTICES.md
     - from: resources/ffmpeg/darwin-${arch}
       to: ffmpeg
       filter: ['ffmpeg', 'ffprobe', 'BUILD-INFO.txt', 'LICENSE.txt']
@@ -69,8 +69,8 @@ win:
     - '!**/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*'
     - '!**/better-sqlite3/prebuilds/win32-arm64.node'
   extraResources:
-    - from: ../../THIRD_PARTY_NOTICES.md
-      to: THIRD_PARTY_NOTICES.md
+    - from: ../../THIRD-PARTY-NOTICES.md
+      to: THIRD-PARTY-NOTICES.md
     - from: resources/ffmpeg/win32-${arch}
       to: ffmpeg
       filter: ['*.exe', '*.dll', 'BUILD-INFO.txt', 'LICENSE.txt']

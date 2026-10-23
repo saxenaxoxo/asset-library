@@ -92,7 +92,7 @@ jobs:
           $setup = Get-ChildItem apps/desktop/dist/*-setup.exe | Select-Object -First 1
           $dir = "$env:RUNNER_TEMP\AssetLibraryInstall"
           Start-Process -FilePath $setup.FullName -ArgumentList '/S', "/D=$dir" -Wait
-          foreach ($file in 'Goated Panels Hub.exe', 'resources\ffmpeg\ffprobe.exe', 'resources\ffmpeg\LICENSE.txt', 'resources\THIRD_PARTY_NOTICES.md', 'resources\app.asar.unpacked\resources\tray.png') {
+          foreach ($file in 'Goated Panels Hub.exe', 'resources\ffmpeg\ffprobe.exe', 'resources\ffmpeg\LICENSE.txt', 'resources\THIRD-PARTY-NOTICES.md', 'resources\app.asar.unpacked\resources\tray.png') {
             if (-not (Test-Path (Join-Path $dir $file))) { throw "Installer didn't install $file" }
           }
           "INSTALL_DIR=$dir" >> $env:GITHUB_ENV
