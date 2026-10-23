@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { FFMPEG } from './harness/library'
 
 // Renders the README screenshot of the asset grid: the real panel UI with the fake Premiere API
@@ -11,7 +11,8 @@ import { FFMPEG } from './harness/library'
 test.skip(!process.env.SCREENSHOT, 'Only runs for `pnpm screenshot`')
 test.skip(!existsSync(FFMPEG), 'Needs the bundled FFmpeg to make thumbnails')
 
-const OUT = join(__dirname, '..', '..', '..', 'docs', 'images', 'asset-grid.png')
+const IMAGES = join(__dirname, '..', '..', '..', 'docs', 'images')
+const OUT = join(IMAGES, 'asset-grid.png')
 
 let home: string
 
@@ -113,7 +114,7 @@ test.beforeAll(() => {
         'leak',
         'type=radial:c0=0xFFD9A0:c1=0xFF6A1A:c2=0x1A0905:x0=120:y0=60:x1=470:y1=260:nb_colors=3'
       ),
-      { hasAlpha: true, favorite: true, width: 3840, height: 2160 }
+      { hasAlpha: true, favorite: true, width: 3840, height: 2160, tags: ['warm', 'overlay'] }
     ),
     video(
       'Neon Sweep.mov',
@@ -133,7 +134,7 @@ test.beforeAll(() => {
         'color=c=0x2A241C:s=480x270',
         'noise=alls=55:allf=t,vignette=PI/4'
       ),
-      { hasAlpha: true }
+      { hasAlpha: true, tags: ['overlay', 'texture'] }
     ),
     video(
       'Film Burn 01.mov',
@@ -143,7 +144,7 @@ test.beforeAll(() => {
         'burn',
         'type=circular:c0=0xFFF1C7:c1=0xFF8A00:c2=0x7A0F00:c3=0x050302:x0=330:y0=120:x1=480:y1=270:nb_colors=4'
       ),
-      { hasAlpha: true }
+      { hasAlpha: true, tags: ['warm', 'overlay'] }
     ),
     video(
       'Bokeh Blue.mov',
@@ -169,7 +170,8 @@ test.beforeAll(() => {
       'Sunset Grade.mov',
       'Backgrounds',
       6000,
-      g('sunset', 'c0=0x2B1055:c1=0xD7316E:c2=0xFFB25B:x0=200:y0=0:x1=280:y1=270:nb_colors=3')
+      g('sunset', 'c0=0x2B1055:c1=0xD7316E:c2=0xFFB25B:x0=200:y0=0:x1=280:y1=270:nb_colors=3'),
+      { tags: ['warm'] }
     ),
     video(
       'Lime Pulse.mov',
@@ -217,7 +219,7 @@ test.beforeAll(() => {
       updatedAt: 1,
       app: '0.1.1',
       roots: [{ id: 1, label: 'SSD', online: true, path: '/Volumes/SSD' }],
-      tags: [],
+      tags: ['overlay', 'texture', 'warm'],
       assets
     })
   )
@@ -271,4 +273,60 @@ test('asset grid screenshot for the README', async () => {
   } finally {
     await app.close()
   }
+})
+
+/** Opens the panel at a panel-like size, runs `setup`, and captures everything above the track
+ * and edit controls (only the tag chips of the bottom bar are kept). */
+async function panelShot(name: string, setup: (page: Page) => Promise<void>): Promise<void> {
+  // A fresh profile each time: the panel remembers the last folder and view.
+  rmSync(join(home, 'profile'), { recursive: true, force: true })
+  const app = await electron.launch({
+    args: [join(__dirname, 'harness', 'main.cjs')],
+    env: { ...process.env, HARNESS_HOME: home }
+  })
+  try {
+    const page = await app.firstWindow()
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 640))
+    await expect(page.locator('.tile')).toHaveCount(12)
+    await page.selectOption('.size-select', '160')
+    await setup(page)
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll<HTMLImageElement>('.grid img')).every((i) => i.complete)
+    )
+    const bottom = await page.evaluate(() => {
+      const tags = document.querySelector<HTMLElement>('.tag-row')
+      if (tags && tags.offsetParent !== null) return tags.getBoundingClientRect().bottom + 6
+      return document.querySelector<HTMLElement>('.footer')!.getBoundingClientRect().top
+    })
+    const width = await page.evaluate(() => document.documentElement.clientWidth)
+    mkdirSync(IMAGES, { recursive: true })
+    await page.screenshot({ path: join(IMAGES, name), clip: { x: 0, y: 0, width, height: bottom } })
+  } finally {
+    await app.close()
+  }
+}
+
+test('panel screenshot: search', async () => {
+  await panelShot('panel-search.png', async (page) => {
+    await page.fill('.search', 'warm')
+    await expect(page.locator('.tile')).toHaveCount(3)
+  })
+})
+
+test('panel screenshot: waveforms', async () => {
+  await panelShot('panel-waveforms.png', async (page) => {
+    await page.locator('.tree-row.folder', { hasText: 'SFX' }).click()
+    await expect(page.locator('.tile')).toHaveCount(3)
+    await page.locator('.tile', { hasText: 'Whoosh Big.wav' }).click()
+  })
+})
+
+test('panel screenshot: tags', async () => {
+  await panelShot('panel-tags.png', async (page) => {
+    await page.locator('.tree-row.section', { hasText: 'Tags' }).click()
+    await page.locator('.tree-row.special[title="overlay"]').click()
+    await expect(page.locator('.tile')).toHaveCount(3)
+    await page.locator('.tile', { hasText: 'Light Leak 02.mov' }).click()
+    await expect(page.locator('.tag-row .tag')).toHaveCount(2)
+  })
 })
