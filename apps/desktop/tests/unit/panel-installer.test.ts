@@ -460,6 +460,14 @@ describe('PanelInstaller', () => {
     expect(outdated.installedCep).toEqual([])
   })
 
+  it('reports what is installed after an install in progress, not the version before it', async () => {
+    const { installer: i } = installer({ installed: ['0.3.0'], premiere: ['27.0.0'] })
+    const installing = i.install()
+    const seen = await i.inventory()
+    expect(seen?.[0]?.uxp).toEqual(['0.3.14'])
+    expect((await installing).ok).toBe(true)
+  })
+
   it('runs one install at a time', async () => {
     const { installer: i, calls } = installer()
     const [a, b] = await Promise.all([i.install(), i.install()])

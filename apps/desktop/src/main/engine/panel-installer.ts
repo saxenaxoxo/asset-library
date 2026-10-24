@@ -296,6 +296,8 @@ export class PanelInstaller {
   async inventory(): Promise<PremiereInstall[] | null> {
     const agent = this.agent()
     if (!agent) return null
+    // Report what's there after an install or removal in progress, not halfway through it.
+    await this.queue
     const listed = await this.deps.run(agent, upiaArgs(this.deps.platform, { action: 'list' }))
     return premiereInventory(listed.output, this.deps.panelName)
   }

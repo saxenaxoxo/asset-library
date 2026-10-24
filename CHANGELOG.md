@@ -4,7 +4,17 @@
 
 - Fixed: adding a library folder from the Premiere panel failed with "its location wasn't complete" when the folder's path contained spaces or other special characters. Adobe's folder picker reports such folders as a `file://` address; the panel and the app now turn it into a normal path. Importing files had the same problem and is fixed too.
 
-## Unreleased
+## 0.2.0 (Mac), panel 0.4.4
+
+### Fixed in the Premiere panel
+
+- The video track, audio track and Overwrite/Insert menus at the bottom of the panel couldn't be changed in Premiere Pro: Premiere draws a standard dropdown's list outside the panel and ignores picks there. They're now menus drawn inside the panel, opening upward, and they work from the keyboard too.
+
+### Fixed in Goated Panels Hub
+
+- Quitting with the Hub window open didn't finish: the panel showed "not running" while the Hub stayed alive with no window or menu-bar icon. Quitting now always completes.
+- Right after the Hub updated the panel by itself, its window could still show the old version with "Update available". It now waits for that update and shows what's really installed.
+- An unpublished or unreadable download list no longer shows a warning when the Hub has its own copy of the panel to install (being offline is still mentioned).
 
 ### Clearer that the Hub is the engine, and fixes
 

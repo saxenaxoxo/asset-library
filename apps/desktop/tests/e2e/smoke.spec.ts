@@ -271,3 +271,21 @@ test('runs in the background as the engine for the Premiere panel', async () => 
   rmSync(userDataDir, { recursive: true, force: true })
   rmSync(folder, { recursive: true, force: true })
 })
+
+test('quits for real with the window open, and the panel sees it stop', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'asset-library-e2e-'))
+  const app = await launch(userDataDir)
+  await app.firstWindow()
+  const engineFile = join(userDataDir, 'catalog', 'engine.json')
+  await expect.poll(() => existsSync(engineFile), { timeout: 15_000 }).toBe(true)
+  const exited = new Promise<number | null>((resolve) => app.process().once('exit', resolve))
+  // What Cmd+Q, the menu-bar Quit (once confirmed) and a logout do.
+  await app.evaluate(({ app: electronApp }) => electronApp.quit())
+  const code = await Promise.race([
+    exited,
+    new Promise<string>((resolve) => setTimeout(() => resolve('still running'), 10_000))
+  ])
+  expect(code).toBe(0)
+  expect(existsSync(engineFile)).toBe(false)
+  rmSync(userDataDir, { recursive: true, force: true })
+})

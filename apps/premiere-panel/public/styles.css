@@ -553,8 +553,8 @@ body {
   margin-bottom: 6px;
 }
 
-/* Video track, audio track and edit type: equal columns on one line. */
-.control-row.choices select {
+/* Video track, audio track and edit type: equal columns on one line, each an in-panel menu. */
+.control-row.choices .choice {
   flex-grow: 1;
   flex-shrink: 1;
   flex-basis: 0;
@@ -562,9 +562,82 @@ body {
   margin: 0 6px 0 0;
 }
 
-.control-row.choices select:last-child,
+.control-row.choices .choice:last-child,
 .control-row.actions .button:last-child {
   margin-right: 0;
+}
+
+.choice {
+  position: relative;
+}
+
+.choice-button {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 3px 6px;
+  font-size: 11px;
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.choice-button:focus {
+  outline: none;
+  border-color: var(--ink-2);
+}
+
+.choice-text {
+  flex-grow: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.choice-caret {
+  margin-left: 4px;
+  color: var(--ink-2);
+}
+
+/* Opens upward, above its button, so it stays inside the panel. */
+.choice-list {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 3px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  z-index: 30;
+}
+
+.choice.open .choice-list {
+  display: block;
+}
+
+.choice-item {
+  padding: 4px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.choice-item:hover,
+.choice-item.active {
+  background: var(--line);
+}
+
+.choice-item[aria-selected='true'] {
+  font-weight: 600;
 }
 
 .control-row.actions .button {

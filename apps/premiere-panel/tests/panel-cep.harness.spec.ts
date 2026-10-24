@@ -36,9 +36,25 @@ test('CEP panel places through ExtendScript and drags files the way Premiere exp
   expect((await calls()).some((c) => c.type === 'keys')).toBe(true)
   await expect(page.locator('.tree-row.section', { hasText: 'SSD' })).toBeVisible()
 
-  // Placing goes through host.jsx with the chosen tracks and edit type.
-  await page.selectOption('select[aria-label="Video track"]', '1')
-  await page.selectOption('select[aria-label="Audio track"]', '1')
+  // Placing goes through host.jsx with the chosen tracks and edit type. The track menus are drawn
+  // inside the panel (Premiere's native dropdown list doesn't take picks at the panel's bottom
+  // edge): V3 by mouse, A2 by keyboard.
+  const video = page.getByRole('button', { name: 'Video track' })
+  await video.click()
+  await expect(page.getByRole('listbox', { name: 'Video track' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/panel-track-menu.png' })
+  await page.getByRole('option', { name: 'V3' }).click()
+  await expect(video).toHaveText(/V3/)
+  await expect(page.getByRole('listbox', { name: 'Video track' })).toBeHidden()
+  const audio = page.getByRole('button', { name: 'Audio track' })
+  await audio.focus()
+  await page.keyboard.press('ArrowDown') // opens on A2 (the saved choice)
+  await page.keyboard.press('ArrowUp') // A1
+  await page.keyboard.press('ArrowDown') // back to A2
+  await page.keyboard.press('Enter')
+  await expect(audio).toHaveText(/A2/)
+  // Keys used inside a menu never reach the grid: nothing was placed.
+  expect((await calls()).filter((c) => c.type === 'place')).toEqual([])
   await page.locator('.tile', { hasText: 'Light Leak.mov' }).click()
   await page.locator('.controls .button.primary').click()
   await expect(page.locator('.status.ok')).toContainText('Light Leak.mov')
@@ -48,7 +64,7 @@ test('CEP panel places through ExtendScript and drags files the way Premiere exp
       path: '/Volumes/SSD/Overlays/Light Leak.mov',
       name: 'Light Leak.mov',
       mode: 'overwrite',
-      v: 1,
+      v: 2,
       a: 1,
       mogrt: false,
       kind: 'video',

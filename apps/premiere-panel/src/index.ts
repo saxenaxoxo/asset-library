@@ -2041,24 +2041,108 @@ async function placeSelection(assets: CatalogAsset[]): Promise<void> {
   }
 }
 
-function trackSelect(
-  label: string,
-  value: number,
-  onChange: (value: number) => void
-): HTMLSelectElement {
-  const select = el('select')
-  select.setAttribute('aria-label', label)
-  for (let i = 0; i < 8; i++) {
-    const option = el('option', '', `${label[0]}${i + 1}`)
-    option.value = String(i)
-    if (i === value) option.selected = true
-    select.append(option)
-  }
-  select.addEventListener('change', () => onChange(Number(select.value)))
-  return select
+interface Choice<T extends string> {
+  value: T
+  label: string
 }
 
-const modeSelect = el('select')
+/**
+ * A menu drawn inside the panel. Premiere draws a CEP panel's native <select> list outside the
+ * panel, and next to the panel's bottom edge picking from it often doesn't register, so the
+ * footer's menus open upward inside the panel instead. Laid out with CSS only: UXP reports no
+ * element sizes to measure.
+ */
+function choiceMenu<T extends string>(
+  label: string,
+  choices: readonly Choice<T>[],
+  current: T,
+  onChange: (value: T) => void
+): HTMLElement {
+  const wrap = el('div', 'choice')
+  const toggle = el('div', 'choice-button')
+  const text = el('span', 'choice-text')
+  toggle.append(text, el('span', 'choice-caret', '▾'))
+  toggle.setAttribute('role', 'button')
+  toggle.setAttribute('tabindex', '0')
+  toggle.setAttribute('aria-haspopup', 'listbox')
+  toggle.setAttribute('aria-expanded', 'false')
+  toggle.setAttribute('aria-label', label)
+  const list = el('div', 'choice-list')
+  list.setAttribute('role', 'listbox')
+  list.setAttribute('aria-label', label)
+  let value = current
+  let active = 0
+  const indexOf = (v: T): number =>
+    Math.max(
+      0,
+      choices.findIndex((c) => c.value === v)
+    )
+  const items = choices.map((choice, i) => {
+    const item = el('div', 'choice-item', choice.label)
+    item.setAttribute('role', 'option')
+    // mousedown, so the button keeps focus and its blur doesn't close the menu first.
+    item.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      pick(i)
+    })
+    list.append(item)
+    return item
+  })
+  const sync = (): void => {
+    const selected = indexOf(value)
+    text.textContent = choices[selected]?.label ?? ''
+    items.forEach((item, i) => {
+      item.setAttribute('aria-selected', String(i === selected))
+      item.classList.toggle('active', i === active)
+    })
+  }
+  const isOpen = (): boolean => wrap.classList.contains('open')
+  const setOpen = (open: boolean): void => {
+    if (open) active = indexOf(value)
+    wrap.classList.toggle('open', open)
+    toggle.setAttribute('aria-expanded', String(open))
+    sync()
+  }
+  const pick = (i: number): void => {
+    const choice = choices[i]
+    setOpen(false)
+    if (choice && choice.value !== value) {
+      value = choice.value
+      sync()
+      onChange(choice.value)
+    }
+  }
+  toggle.addEventListener('mousedown', (event) => {
+    event.preventDefault()
+    toggle.focus()
+    setOpen(!isOpen())
+  })
+  toggle.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (!isOpen()) setOpen(true)
+      else {
+        const step = event.key === 'ArrowDown' ? 1 : -1
+        active = Math.min(choices.length - 1, Math.max(0, active + step))
+        sync()
+      }
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      if (isOpen()) pick(active)
+      else setOpen(true)
+    } else if (event.key === 'Escape' && isOpen()) {
+      setOpen(false)
+    } else return
+    event.preventDefault()
+    event.stopPropagation()
+  })
+  toggle.addEventListener('blur', () => setOpen(false))
+  wrap.append(list, toggle)
+  sync()
+  return wrap
+}
+
+const trackChoices = (letter: string): Choice<string>[] =>
+  Array.from({ length: 8 }, (_, i) => ({ value: String(i), label: `${letter}${i + 1}` }))
+
 const placeButton = el('div', 'button primary', 'Add at playhead')
 
 // The footer controls are built once; renders only update them, so open menus stay open.
@@ -2068,33 +2152,30 @@ function buildControls(): void {
   controls.append(choiceRow, actionRow)
   const saveOptions = (): void => save(KEYS.options, state.options)
   choiceRow.append(
-    trackSelect('Video track', state.options.videoTrack, (value) => {
-      state.options.videoTrack = value
+    choiceMenu('Video track', trackChoices('V'), String(state.options.videoTrack), (value) => {
+      state.options.videoTrack = Number(value)
       saveOptions()
     }),
-    trackSelect('Audio track', state.options.audioTrack, (value) => {
-      state.options.audioTrack = value
+    choiceMenu('Audio track', trackChoices('A'), String(state.options.audioTrack), (value) => {
+      state.options.audioTrack = Number(value)
       saveOptions()
-    })
+    }),
+    choiceMenu(
+      'Edit type',
+      [
+        { value: 'overwrite', label: 'Overwrite' },
+        { value: 'insert', label: 'Insert' }
+      ],
+      state.options.mode,
+      (value) => {
+        state.options.mode = value === 'insert' ? 'insert' : 'overwrite'
+        saveOptions()
+      }
+    )
   )
-  modeSelect.setAttribute('aria-label', 'Edit type')
-  for (const [value, label] of [
-    ['overwrite', 'Overwrite'],
-    ['insert', 'Insert']
-  ] as const) {
-    const option = el('option', '', label)
-    option.value = value
-    if (state.options.mode === value) option.selected = true
-    modeSelect.append(option)
-  }
-  modeSelect.addEventListener('change', () => {
-    state.options.mode = modeSelect.value === 'insert' ? 'insert' : 'overwrite'
-    saveOptions()
-  })
   placeButton.addEventListener('click', () => {
     if (!placeButton.classList.contains('disabled')) void placeSelection(selectedAssets())
   })
-  choiceRow.append(modeSelect)
   actionRow.append(placeButton)
 }
 
@@ -2269,6 +2350,7 @@ document.addEventListener('keydown', (event) => {
   // Keys in a field, menu or button belong to that control.
   const target = event.target as HTMLElement | null
   if (target?.tagName && TYPING_TAGS.includes(target.tagName.toLowerCase())) return
+  if (target?.closest?.('.choice')) return
   if (document.activeElement === search || state.tab !== 'library') return
   if (event.key === '/') {
     event.preventDefault()

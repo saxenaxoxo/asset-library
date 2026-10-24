@@ -85,7 +85,9 @@ Ideas and bugs are tracked in [Issues](https://github.com/saxenaxoxo/asset-libra
 **Is it free?** Yes. Asset Library is free to use, and the code is MIT-licensed.
 
 **Does it upload my files or track me?** No. There's no account and no analytics. Your library lives on
-your Mac. The only network call is an optional check on GitHub for a newer version.
+your Mac. The Hub contacts GitHub only to check for a newer version (optional, once a day) and to read
+the panel download list when you open its window or install a panel. Nothing about you or your files is
+sent.
 
 **Which Premiere Pro versions work?** The panel is built for Premiere Pro 24 to 26 and tested on 26.5.
 Premiere Pro 27 and later get a separate build that the Hub installs for you.

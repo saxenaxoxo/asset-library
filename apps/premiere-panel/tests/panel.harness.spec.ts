@@ -206,8 +206,8 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await expect(page.locator('.preview')).toHaveCount(0)
 
   // Choose V2 / A2, select an overlay, add it at the playhead.
-  await page.selectOption('select[aria-label="Video track"]', '1')
-  await page.selectOption('select[aria-label="Audio track"]', '1')
+  await expect(page.getByRole('button', { name: 'Video track' })).toHaveText(/V2/)
+  await expect(page.getByRole('button', { name: 'Audio track' })).toHaveText(/A2/)
   await page.locator('.tile', { hasText: 'Light Leak.mov' }).click()
   await page.screenshot({ path: 'test-results/panel.png' })
   await page.locator('.button.primary', { hasText: 'Add at playhead' }).click()
@@ -297,7 +297,9 @@ test('panel browses folders, organizes, and places the selection at the playhead
   // Enter inside a menu belongs to the menu, not to "add at playhead".
   await page.locator('.tile', { hasText: 'Whoosh Big.wav' }).click()
   const before = (await calls()).length
-  await page.locator('select[aria-label="Video track"]').dispatchEvent('keydown', { key: 'Enter' })
+  await page.getByRole('button', { name: 'Video track' }).focus()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Escape')
   await page.waitForTimeout(300)
   expect((await calls()).length).toBe(before)
   // ...while Enter elsewhere still adds the selection (imports Whoosh, then places it).

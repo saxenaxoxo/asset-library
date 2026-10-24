@@ -154,24 +154,29 @@ export function InstallScreen({
           </CompatibilityNotice>
         </div>
       )}
-      {status && catalog && (catalog.state === 'offline' || catalog.state === 'invalid') && (
-        <div className="mt-3">
-          <CompatibilityNotice tone="info">
-            <p>
-              {catalog.state === 'offline'
-                ? "You're offline, so newer panel versions can't be checked."
-                : (catalog.message ?? "The panel download list couldn't be read.")}{' '}
-              {status.bundled.cep || status.bundled.uxp
-                ? `Install uses the panel built into ${brand.hubName}.`
-                : ''}
-            </p>
-            <button type="button" onClick={onRetry} className={`${buttonClass('quiet')} mt-2`}>
-              <RefreshCw {...ICON} />
-              Check again
-            </button>
-          </CompatibilityNotice>
-        </div>
-      )}
+      {/* An unreadable download list (say, not published yet) matters only when this copy has no
+          panel of its own to fall back on; otherwise it would look like a fault when there's none. */}
+      {status &&
+        catalog &&
+        (catalog.state === 'offline' ||
+          (catalog.state === 'invalid' && !status.bundled.cep && !status.bundled.uxp)) && (
+          <div className="mt-3">
+            <CompatibilityNotice tone="info">
+              <p>
+                {catalog.state === 'offline'
+                  ? "You're offline, so newer panel versions can't be checked."
+                  : (catalog.message ?? "The panel download list couldn't be read.")}{' '}
+                {status.bundled.cep || status.bundled.uxp
+                  ? `Install uses the panel built into ${brand.hubName}.`
+                  : ''}
+              </p>
+              <button type="button" onClick={onRetry} className={`${buttonClass('quiet')} mt-2`}>
+                <RefreshCw {...ICON} />
+                Check again
+              </button>
+            </CompatibilityNotice>
+          </div>
+        )}
 
       <div className="mt-4">
         {error ? (

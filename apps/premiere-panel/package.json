@@ -1,6 +1,6 @@
 {
   "name": "asset-library-premiere-panel",
-  "version": "0.4.2",
+  "version": "0.4.4",
   "private": true,
   "description": "Asset Library panel for Adobe Premiere Pro (UXP and CEP builds).",
   "license": "MIT",

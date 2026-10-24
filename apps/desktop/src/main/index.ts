@@ -449,19 +449,11 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       refreshTray()
     })
 
-    // Quitting removes engine.json, so the panel shows "not running" at once. The status write
-    // in progress (if any) is awaited first, or it would put the file back.
-    app.on('before-quit', (event) => {
-      if (quitting) return
-      quitting = true
-      event.preventDefault()
-      panelRequests.stop()
-      audio.destroy()
-      updates.stop()
-      void engineStatus.shutdown().finally(() => app.quit())
-    })
-    app.on('will-quit', () => {
-      // Order matters: stop scheduling work, stop the worker, then close the database.
+    // Order matters: stop scheduling work, stop the worker, then close the database. Runs once.
+    let engineStopped = false
+    const shutDownEngine = (): void => {
+      if (engineStopped) return
+      engineStopped = true
       panelRequests.stop()
       engineStatus.stop()
       engineStatus.removeFile()
@@ -471,11 +463,31 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       library.stop()
       worker.stop()
       db.close()
+    }
+
+    // Quitting removes engine.json first, so the panel shows "not running" at once (a status write
+    // in progress is awaited, or it would put the file back). Then the app exits directly: a second
+    // app.quit() is dropped by Electron once a window has been open, which left the engine running
+    // with no window, no menu-bar icon and the panel saying it had stopped.
+    app.on('before-quit', (event) => {
+      if (quitting) return
+      quitting = true
+      event.preventDefault()
+      panelRequests.stop()
+      audio.destroy()
+      updates.stop()
+      void engineStatus.shutdown().finally(() => {
+        shutDownEngine()
+        app.exit(0)
+      })
     })
+    app.on('will-quit', shutDownEngine)
 
     const trustedSender = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean =>
       isTrustedSenderUrl(event.senderFrame?.url, devServerUrl, rendererFileUrlPrefix)
     registerIpcHandlers(trustedSender, { db, worker, binaries })
+    // The panel update a new build makes at launch (set below, once the window is up).
+    let launchPanelUpdate: Promise<void> = Promise.resolve()
     registerInstallerHandlers(trustedSender, {
       status: (refresh) =>
         installerStatus({
@@ -486,7 +498,10 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
           packaged: app.isPackaged,
           dataDir: app.getPath('userData'),
           cacheDir: mediaDir,
-          inventory: () => panelInstaller.inventory(),
+          inventory: async () => {
+            await launchPanelUpdate
+            return panelInstaller.inventory()
+          },
           bundled: () => panelInstaller.bundled(),
           catalog: () => panelDelivery.catalog(refresh),
           sources: (catalog, premiere) => panelDelivery.sources(catalog, premiere),
@@ -568,11 +583,15 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
     if (app.isPackaged && !process.env['ASSET_LIBRARY_NO_UPDATE_CHECK']) updates.start()
     if (installedCopy && !process.env['ASSET_LIBRARY_NO_PANEL_INSTALL']) {
       // First launch of a new build: put its panel into Premiere Pro, replacing older copies.
-      void panelInstaller
+      // The window's "what's installed" answer waits for this, so it never shows the old version.
+      launchPanelUpdate = panelInstaller
         .installIfNeeded(settings.panelAutoInstalled, (version) =>
           settings.recordPanelAutoInstall(version)
         )
-        .catch(() => undefined)
+        .then(
+          () => undefined,
+          () => undefined
+        )
     }
     // Automated tests point the app at a fixture folder (there's no way to drive the OS folder picker).
     const testRoot = process.env['ASSET_LIBRARY_TEST_ROOT']
