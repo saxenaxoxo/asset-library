@@ -133,6 +133,18 @@ describe('add-folder', () => {
     })
     expect(library.addRoot).not.toHaveBeenCalled()
   })
+
+  it('knows a folder written with a trailing slash, or as a file:// URL, is the same folder', async () => {
+    const dir = tempDir()
+    repo.addRoot(dir, 'Mine')
+    expect(await run({ type: 'add-folder', path: `${dir}/` })).toMatchObject({
+      message: 'Mine is already in the library'
+    })
+    expect(await run({ type: 'add-folder', path: `${pathToFileURL(dir).href}/` })).toMatchObject({
+      message: 'Mine is already in the library'
+    })
+    expect(library.addRoot).not.toHaveBeenCalled()
+  })
 })
 
 describe('remove-folder and rescan', () => {

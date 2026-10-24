@@ -21,6 +21,13 @@ interface StoredSettings {
   latestRelease?: AvailableUpdate
   /** The bundled panel version the engine last tried to install by itself. */
   panelAutoInstalled?: string
+  /**
+   * The choice was made by a copy that may not touch the login item (one not installed yet, e.g.
+   * opened from the disk image), so the installed copy still has to apply it.
+   */
+  loginItemPending?: true
+  /** The one-time "still running in the background" note was shown after closing the window. */
+  backgroundNoteShown?: true
 }
 
 /** Turns the operating system's "open at login" entry on or off. Electron-specific, so injected. */
@@ -59,6 +66,8 @@ export class SettingsStore {
       if (typeof d['panelAutoInstalled'] === 'string') {
         stored.panelAutoInstalled = d['panelAutoInstalled']
       }
+      if (d['loginItemPending'] === true) stored.loginItemPending = true
+      if (d['backgroundNoteShown'] === true) stored.backgroundNoteShown = true
       return stored
     } catch {
       return {}
@@ -103,6 +112,15 @@ export class SettingsStore {
     this.save()
   }
 
+  get backgroundNoteShown(): boolean {
+    return this.stored.backgroundNoteShown === true
+  }
+
+  recordBackgroundNoteShown(): void {
+    this.stored = { ...this.stored, backgroundNoteShown: true }
+    this.save()
+  }
+
   /**
    * Call once at start-up. The first time, turns "start at login" on (the default) and records
    * it, so a later "off" from the user sticks. After that, follows what the OS says, in case the
@@ -110,17 +128,23 @@ export class SettingsStore {
    *
    * `reapplyLoginItem`: the app was just renamed (its data folder moved), so the OS entry still
    * names the old app. The remembered choice is written again for the renamed app instead.
+   * `trustLoginItem: false`: the OS entry may name the old app (a move didn't finish), so it
+   * isn't read as the editor's choice; the remembered one stays.
    */
-  init({ reapplyLoginItem = false }: { reapplyLoginItem?: boolean } = {}): void {
+  init({
+    reapplyLoginItem = false,
+    trustLoginItem = true
+  }: { reapplyLoginItem?: boolean; trustLoginItem?: boolean } = {}): void {
     if (this.stored.startAtLogin === undefined) {
       this.setStartAtLogin(true)
       return
     }
-    if (reapplyLoginItem) {
+    if (!trustLoginItem && !reapplyLoginItem) return
+    const actual = this.loginItem.get()
+    if (reapplyLoginItem || (this.stored.loginItemPending && actual !== null)) {
       this.setStartAtLogin(this.stored.startAtLogin)
       return
     }
-    const actual = this.loginItem.get()
     if (actual !== null && actual !== this.stored.startAtLogin) {
       this.stored = { ...this.stored, startAtLogin: actual }
       this.save()
@@ -129,7 +153,10 @@ export class SettingsStore {
 
   setStartAtLogin(enabled: boolean): void {
     this.loginItem.set(enabled)
-    this.stored = { ...this.stored, startAtLogin: enabled }
+    const next: StoredSettings = { ...this.stored, startAtLogin: enabled }
+    if (this.loginItem.get() === null) next.loginItemPending = true
+    else delete next.loginItemPending
+    this.stored = next
     this.save()
   }
 

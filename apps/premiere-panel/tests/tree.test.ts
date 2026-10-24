@@ -22,6 +22,7 @@ import {
   parseEngineStatus,
   parseRequest,
   plainPath,
+  importBatches,
   requestId,
   ENGINE_STALE_MS
 } from '@catalog/requests'
@@ -83,6 +84,36 @@ describe('plainPath', () => {
     expect(plainPath('/Volumes/SSD/100% Hits')).toBe('/Volumes/SSD/100% Hits')
     expect(plainPath('  C:\\Clips  ')).toBe('C:\\Clips')
     expect(plainPath('file:///tmp/100%')).toBe('/tmp/100%')
+  })
+  it('opens network shares and keeps decoding around a stray %', () => {
+    expect(plainPath('file://server/share/Clips%20A')).toBe('//server/share/Clips A')
+    expect(plainPath('file:///Volumes/My%20Drive/50%25%20off')).toBe('/Volumes/My Drive/50% off')
+    expect(plainPath('file:///Volumes/My%20Drive/50% off')).toBe('/Volumes/My Drive/50% off')
+    expect(plainPath('file:///C:')).toBe('C:')
+  })
+})
+
+describe('importBatches', () => {
+  it('splits a big pick into requests the engine accepts', () => {
+    const files = Array.from({ length: 1201 }, (_, i) => `/Volumes/SSD/Pack/Clip ${i}.mov`)
+    const batches = importBatches(files)
+    expect(batches.map((batch) => batch.length)).toEqual([500, 500, 201])
+    expect(batches.flat()).toEqual(files)
+    for (const batch of batches) {
+      expect(parseRequest(JSON.stringify({ type: 'import-files', files: batch }))).not.toBeNull()
+    }
+  })
+
+  it('keeps long paths under the request size limit', () => {
+    const long = `/Volumes/Ünïcødé Drive/${'Very long folder name/'.repeat(8)}`
+    const files = Array.from({ length: 600 }, (_, i) => `${long}Clip ${i}.mov`)
+    const batches = importBatches(files)
+    expect(batches.length).toBeGreaterThan(2)
+    for (const batch of batches) {
+      const text = JSON.stringify({ type: 'import-files', files: batch, rootId: 1, folder: 'A' })
+      expect(new TextEncoder().encode(text).length).toBeLessThan(64 * 1024)
+      expect(parseRequest(text)).not.toBeNull()
+    }
   })
 })
 

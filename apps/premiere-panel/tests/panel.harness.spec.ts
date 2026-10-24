@@ -345,3 +345,49 @@ test('panel browses folders, organizes, and places the selection at the playhead
   await expect(page.locator('.tile.selected')).toHaveCount(0)
   await app.close()
 })
+
+test('says plainly when Goated Panels Hub is not running, with a Start button', async () => {
+  // A heartbeat from long ago: the Hub quit (or crashed) and the panel must say so.
+  writeFileSync(
+    join(catalogDir, 'engine.json'),
+    JSON.stringify({
+      version: '0.1.0',
+      updatedAt: 1,
+      indexing: { rootIds: [], filesSeen: 0 },
+      pendingMedia: 0,
+      settings: { startAtLogin: true },
+      importsFolder: '/Users/me/Movies/Asset Library Imports',
+      results: []
+    })
+  )
+  const app = await electron.launch({
+    args: [join(__dirname, 'harness', 'main.cjs')],
+    env: { ...process.env, HARNESS_HOME: home }
+  })
+  const page = await app.firstWindow()
+  const banner = page.locator('.engine-banner')
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText(
+    "Goated Panels Hub isn't running. It's the engine this panel needs"
+  )
+  await page.screenshot({ path: 'test-results/panel-engine-stopped.png' })
+  await banner.locator('.button', { hasText: 'Start Goated Panels Hub' }).click()
+  await expect(banner).toContainText('Starting Goated Panels Hub')
+  const calls = await page.evaluate(
+    () => (window as unknown as { __calls: { type: string; url?: string }[] }).__calls
+  )
+  expect(calls).toContainEqual({ type: 'open-url', url: 'assetlibrary://start' })
+
+  // Settings explains what the Hub is, with the same button.
+  await page.locator('.tab', { hasText: 'Settings' }).click()
+  await expect(
+    page.locator('.settings-title', { hasText: 'Goated Panels Hub (the engine)' })
+  ).toBeVisible()
+  await expect(page.locator('.settings')).toContainText('is the engine this panel needs')
+  await page.screenshot({ path: 'test-results/panel-settings-stopped.png' })
+
+  // Once the Hub reports in, the banner goes away.
+  engineStatus()
+  await expect(banner).toBeHidden({ timeout: 10_000 })
+  await app.close()
+})

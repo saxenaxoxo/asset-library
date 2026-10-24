@@ -619,6 +619,23 @@ body {
   color: var(--danger);
 }
 
+/* "The Hub isn't running": over the library, with a Start button. */
+.engine-banner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--brand-surface);
+  border-bottom: 1px solid var(--line-strong);
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.engine-banner-text {
+  flex: 1;
+  margin-right: 6px;
+}
+
 /* Tags of the selected asset. */
 .tag-row {
   display: flex;

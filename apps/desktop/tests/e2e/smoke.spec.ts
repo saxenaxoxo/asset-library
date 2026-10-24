@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { OFFLINE_MANIFEST_URL } from './fixtures'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 
 // The app's own version, so the tests don't need editing at every release.
@@ -19,7 +20,9 @@ function launch(userDataDir: string, ...extra: string[]): Promise<ElectronApplic
     ...process.env,
     ASSET_LIBRARY_NO_LOGIN_ITEM: '1',
     ASSET_LIBRARY_NO_PANEL_INSTALL: '1',
-    ASSET_LIBRARY_NO_UPDATE_CHECK: '1'
+    ASSET_LIBRARY_NO_UPDATE_CHECK: '1',
+    // The panel download list: never the real server in tests.
+    ASSET_LIBRARY_TEST_MANIFEST_URL: OFFLINE_MANIFEST_URL
   }
   return electron.launch(
     executablePath ? { executablePath, args, env } : { args: ['.', ...args], env }
@@ -43,6 +46,8 @@ test('opens the installer: install, manage, about and help', async () => {
   await expect(methods.getByRole('radio')).toHaveCount(2)
   await expect(methods.getByText('Modern')).toBeVisible()
   await expect(methods.getByText('Legacy')).toBeVisible()
+  // Read from Adobe's real installer on this computer: with the panel installed, both the summary
+  // and the method card say "Installed:".
   await expect(page.getByText(/Not installed|Installed:|Couldn't check/).first()).toBeVisible({
     timeout: 20_000
   })
@@ -63,8 +68,23 @@ test('opens the installer: install, manage, about and help', async () => {
     page.locator('footer').getByRole('button', { name: 'Not available yet' })
   ).toBeDisabled()
 
+  // Every screen says the Hub is the engine the panel needs, and that it keeps running.
+  const engineBar = page.getByRole('region', { name: 'Engine status' })
+  await expect(engineBar).toContainText('Goated Panels Hub is running')
+  await expect(engineBar).toContainText("Closing this window doesn't stop it")
+  await expect(page.locator('footer').getByRole('button', { name: 'Close window' })).toBeVisible()
+
   await page.getByRole('button', { name: 'Manage' }).click()
+  await expect(page.getByRole('heading', { name: 'Background engine' })).toBeVisible()
+  const login = page.getByRole('checkbox', { name: /Start Goated Panels Hub when I log in/ })
+  await expect(login).toBeChecked()
+  await login.uncheck()
+  await expect(login).not.toBeChecked()
+  await login.check()
+  await expect(login).toBeChecked()
   await expect(page.getByRole('heading', { name: 'Installed panels' })).toBeVisible()
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: 'test-results/installer-manage.png' })
   await expect(page.getByRole('button', { name: 'Uninstall Goated Panels Hub…' })).toBeVisible()
   await page.getByRole('button', { name: 'About' }).click()
   await expect(page.getByText('App version')).toBeVisible()
@@ -73,7 +93,8 @@ test('opens the installer: install, manage, about and help', async () => {
   await expect(page.getByText(APP_VERSION).first()).toBeVisible()
   await expect(page.getByRole('button', { name: /Source code/ })).toBeVisible()
   await page.getByRole('button', { name: 'Help', exact: true }).first().click()
-  await expect(page.getByRole('heading', { name: 'Install in four steps' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Install in five steps' })).toBeVisible()
+  await expect(page.getByText(/Keep Goated Panels Hub running in the background/)).toBeVisible()
   await page.screenshot({ path: 'test-results/installer-help.png' })
   await page.getByRole('button', { name: 'Install' }).click()
 
@@ -86,12 +107,16 @@ test('opens the installer: install, manage, about and help', async () => {
       Object.keys((globalThis as unknown as { assetLibrary: object }).assetLibrary).sort()
     )
   ).toEqual([
+    'cancelDownload',
     'getDiagnostics',
+    'getEngineState',
+    'getInstallProgress',
     'getInstallerStatus',
     'installPanel',
     'openLink',
     'removePanel',
     'revealLocation',
+    'setStartAtLogin',
     'uninstallApp'
   ])
 
@@ -134,11 +159,53 @@ test('opens the installer: install, manage, about and help', async () => {
 
   await page.screenshot({ path: 'test-results/shell.png' })
 
-  // Closing the window keeps the engine running for the Premiere panel.
+  // Native dialogs are recorded instead of shown; `answer` is the button the test "clicks".
+  await app.evaluate(({ dialog }) => {
+    const seen: { message: string; detail?: string; buttons?: string[] }[] = []
+    ;(globalThis as Record<string, unknown>)['dialogsSeen'] = seen
+    ;(globalThis as Record<string, unknown>)['dialogAnswer'] = 1
+    dialog.showMessageBox = (async (...args: unknown[]) => {
+      const options = args.at(-1) as { message: string; detail?: string; buttons?: string[] }
+      seen.push({ message: options.message, detail: options.detail, buttons: options.buttons })
+      return {
+        response: (globalThis as Record<string, unknown>)['dialogAnswer'] as number,
+        checkboxChecked: false
+      }
+    }) as typeof dialog.showMessageBox
+  })
+  const dialogsSeen = (): Promise<{ message: string; detail?: string; buttons?: string[] }[]> =>
+    app.evaluate(
+      () =>
+        (globalThis as Record<string, unknown>)['dialogsSeen'] as {
+          message: string
+          detail?: string
+          buttons?: string[]
+        }[]
+    )
+
+  // Quit asks first, since the panel needs the engine; "Keep running" keeps it running.
+  if (process.platform === 'darwin') {
+    await app.evaluate(({ Menu }) => {
+      const appMenu = Menu.getApplicationMenu()?.items[0]?.submenu
+      appMenu?.items.find((item) => item.label.startsWith('Quit'))?.click()
+    })
+    await expect.poll(async () => (await dialogsSeen()).length).toBe(1)
+    const [quit] = await dialogsSeen()
+    expect(quit?.message).toBe('Quit Goated Panels Hub?')
+    expect(quit?.detail).toContain('Asset Library panel in Premiere Pro needs')
+    expect(quit?.buttons).toEqual(['Quit', 'Keep running'])
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
+  }
+
+  // Closing the window keeps the engine running for the Premiere panel, and says so (once).
+  const before = (await dialogsSeen()).length
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
   await expect
     .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length))
     .toBe(0)
+  await expect.poll(async () => (await dialogsSeen()).length).toBe(before + 1)
+  expect((await dialogsSeen()).at(-1)?.message).toBe('Goated Panels Hub is still running')
   await new Promise((resolve) => setTimeout(resolve, 500))
   expect(await app.evaluate(({ app: electronApp }) => electronApp.isReady())).toBe(true)
   await app.close()

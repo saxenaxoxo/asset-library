@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 import type { CatalogAsset } from '@catalog/types'
-import { checksums, createFixtureLibrary, hasFfmpeg } from './fixtures'
+import { checksums, createFixtureLibrary, hasFfmpeg, OFFLINE_MANIFEST_URL } from './fixtures'
 
 test.skip(!hasFfmpeg, 'Needs the bundled FFmpeg (run scripts/ffmpeg first)')
 
@@ -19,7 +19,9 @@ function launch(): Promise<ElectronApplication> {
     ASSET_LIBRARY_TEST_ROOT: libraryDir,
     ASSET_LIBRARY_NO_LOGIN_ITEM: '1',
     ASSET_LIBRARY_NO_PANEL_INSTALL: '1',
-    ASSET_LIBRARY_NO_UPDATE_CHECK: '1'
+    ASSET_LIBRARY_NO_UPDATE_CHECK: '1',
+    // The panel download list: never the real server in tests.
+    ASSET_LIBRARY_TEST_MANIFEST_URL: OFFLINE_MANIFEST_URL
   }
   return electron.launch(
     executablePath

@@ -240,6 +240,37 @@ describe('PanelInstaller', () => {
     expect(installedCep).toEqual([])
   })
 
+  it('installs a verified download in place of the bundled file of its kind', async () => {
+    const both = ['Asset-Library-Premiere-0.4.0.ccx', 'Asset-Library-Premiere-CEP-0.4.0.zxp']
+    const {
+      installer: i,
+      calls,
+      installedCep
+    } = installer({
+      bundled: both,
+      premiere: ['26.5.2'],
+      installedCep: ['0.4.0']
+    })
+    const downloaded = '/data/downloads/x/Asset-Library-Premiere-CEP-0.5.0.zxp'
+    expect(
+      await i.install(undefined, [{ kind: 'cep', version: '0.5.0', path: downloaded }])
+    ).toMatchObject({ ok: true, version: '0.5.0' })
+    expect(calls).toContainEqual(['--install', downloaded])
+    expect(calls.some((args) => args[1]?.endsWith('CEP-0.4.0.zxp'))).toBe(false)
+    expect(installedCep).toEqual(['0.5.0'])
+  })
+
+  it('installs a download when nothing is bundled (development builds)', async () => {
+    const { installer: i, installed } = installer({ bundled: null, premiere: ['27.0.0'] })
+    const file = {
+      kind: 'uxp' as const,
+      version: '0.5.0',
+      path: '/d/Asset-Library-Premiere-0.5.0.ccx'
+    }
+    expect(await i.install(undefined, [file])).toMatchObject({ ok: true })
+    expect(installed).toEqual(['0.5.0'])
+  })
+
   it('removes one build and leaves the other', async () => {
     const {
       installer: i,
@@ -434,5 +465,18 @@ describe('PanelInstaller', () => {
     const [a, b] = await Promise.all([i.install(), i.install()])
     expect(a).toBe(b)
     expect(calls.filter(([flag]) => flag === '--install')).toHaveLength(1)
+  })
+  it('runs a different install after the first, with its own result', async () => {
+    const { installer: i, calls } = installer()
+    const download = {
+      kind: 'uxp' as const,
+      version: '9.9.9',
+      path: '/Downloads/Premiere-9.9.9.ccx'
+    }
+    const [first, second] = await Promise.all([i.install(), i.install(['uxp'], [download])])
+    expect(first).not.toBe(second)
+    expect(second.message).toContain('9.9.9')
+    const installs = calls.filter(([flag]) => flag === '--install').map(([, file]) => file)
+    expect(installs.at(-1)).toBe(download.path)
   })
 })

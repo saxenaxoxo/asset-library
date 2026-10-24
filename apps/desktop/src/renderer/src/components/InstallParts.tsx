@@ -18,7 +18,7 @@ import {
 } from '@shared/installer'
 import { brand } from '@brand/brand-config'
 import { BrandMark } from './BrandMark'
-import type { HostApp } from '../lib/install-plan'
+import { formatBytes, type HostApp } from '../lib/install-plan'
 import { buttonClass, ICON } from '../lib/ui'
 
 const APPS: { id: HostApp; label: string; icon: typeof Clapperboard }[] = [
@@ -115,7 +115,7 @@ export function InstallationMethodCard({
   recommended,
   versions,
   installed,
-  bundledVersion,
+  source,
   onSelect
 }: {
   build: PanelBuild
@@ -123,11 +123,13 @@ export function InstallationMethodCard({
   recommended: boolean
   versions: string[]
   installed: InstalledPanel[]
-  bundledVersion: string | null
+  /** What Install would use for this build: a download, the Hub's own copy, or nothing. */
+  source: InstallerStatus['available']['cep']
   onSelect: () => void
 }): React.JSX.Element {
   const info = PANEL_BUILDS[build]
-  const state = installState(installed, build, bundledVersion)
+  const availableVersion = source?.version ?? null
+  const state = installState(installed, build, availableVersion)
   const copy = installed.find((panel) => panel.build === build)
   return (
     <label
@@ -182,10 +184,17 @@ export function InstallationMethodCard({
           })}
         </ul>
       )}
+      {source && (
+        <p className="mt-3 text-xs text-ink-3 tabular-nums">
+          {source.from === 'download'
+            ? `Version ${source.version}, downloaded when you install (${formatBytes(source.size ?? 0)})`
+            : `Version ${source.version}, built into ${brand.hubName}`}
+        </p>
+      )}
       {copy && (
-        <p className="mt-3 text-xs text-ink-2">
+        <p className="mt-1 text-xs text-ink-2">
           {state === 'update-available'
-            ? `Installed: ${copy.version}. This app has ${bundledVersion}.`
+            ? `Installed: ${copy.version}. Version ${availableVersion} is available.`
             : `Installed: ${copy.version}`}
         </p>
       )}

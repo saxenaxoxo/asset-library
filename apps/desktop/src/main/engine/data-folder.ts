@@ -25,6 +25,11 @@ export interface DataFolder {
    * old app need rewriting. False whenever the move didn't happen.
    */
   moved: boolean
+  /**
+   * A move was needed but didn't finish (it failed, or both folders hold a library). The OS
+   * login entry may still name the old app, so it says nothing about the editor's choice.
+   */
+  moveUnfinished: boolean
   /** The app can't start safely; it has told the editor and is exiting. */
   quit: boolean
   /** The real install's data folder is in use, so leftovers of the old install may be cleaned up. */
@@ -71,6 +76,7 @@ export function prepareDataFolder(): DataFolder {
   const result: DataFolder = {
     legacyDir,
     moved: false,
+    moveUnfinished: false,
     quit: false,
     realInstall: defaultLocation && !testAppData
   }
@@ -121,7 +127,7 @@ export function prepareDataFolder(): DataFolder {
   if (problem?.tellUser) return quit(splitTitle, problem.tellUser)
   // Nothing moved: run on the old folder this time (the Premiere panel still finds it there).
   if (outcome.kind === 'failed' && outcome.use === 'legacy') app.setPath('userData', legacyDir)
-  return { ...result, moved: outcome.kind === 'moved' }
+  return { ...result, moved: outcome.kind === 'moved', moveUnfinished: outcome.kind !== 'moved' }
 }
 
 /** The move itself, under the lock: everything is checked again, as another launch may have

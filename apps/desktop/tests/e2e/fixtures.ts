@@ -80,3 +80,9 @@ export function checksums(dir: string): Record<string, string> {
   walk(dir, '')
   return result
 }
+
+/**
+ * Where tests point the app's panel download list: a closed port on this computer, so the app
+ * behaves as if offline and never reaches the real download server.
+ */
+export const OFFLINE_MANIFEST_URL = 'http://127.0.0.1:9/panels-manifest.json'

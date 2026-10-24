@@ -86,24 +86,81 @@ const ASSET_ID = /^[0-9a-f-]{36}$/
 const isId = (value: unknown): value is string => typeof value === 'string' && ASSET_ID.test(value)
 const isRootId = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0
+/** Decodes `%xx` escapes; a "%" that isn't one (a folder named "50% off") stays as it is. */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment.replace(/%[0-9A-Fa-f]{2}/g, (escape) => {
+      try {
+        return decodeURIComponent(escape)
+      } catch {
+        return escape
+      }
+    })
+  }
+}
+
 /**
  * A path as a folder or file picker reports it, made plain. Adobe's CEP picker can return a
  * `file://` URL with encoded characters (`%20` for a space) instead of a path; this turns
- * `file:///Volumes/My%20Drive` into `/Volumes/My Drive` and `file:///C:/Clips` into `C:/Clips`.
- * Anything else comes back trimmed and otherwise unchanged.
+ * `file:///Volumes/My%20Drive` into `/Volumes/My Drive`, `file:///C:/Clips` into `C:/Clips` and
+ * `file://server/share` into `//server/share` (a Windows network share). Line breaks around the path go; spaces stay, since a name may end in one.
  */
 export function plainPath(raw: string): string {
   let path = raw.trim()
-  if (!/^file:/i.test(path)) return path
-  path = path.replace(/^file:(\/\/(localhost)?)?/i, '')
-  try {
-    path = decodeURIComponent(path)
-  } catch {
-    // A stray "%" that isn't an escape: keep the text as it is.
+  if (/^file:/i.test(path)) {
+    path = path.replace(/^file:/i, '')
+    let host = ''
+    if (path.startsWith('//')) {
+      const slash = path.indexOf('/', 2)
+      host = slash === -1 ? path.slice(2) : path.slice(2, slash)
+      path = slash === -1 ? '' : path.slice(slash)
+      if (host.toLowerCase() === 'localhost') host = ''
+    }
+    path = path.split('/').map(decodeSegment).join('/')
+    if (host) path = `//${decodeSegment(host)}${path}`
+    // file:///C:/… has a slash before the drive letter.
+    else if (/^\/[A-Za-z]:([\\/]|$)/.test(path)) path = path.slice(1)
   }
-  // file:///C:/… has a slash before the drive letter.
-  if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1)
   return path
+}
+
+/** About how many bytes `JSON.stringify(text)` takes as UTF-8 (escapes counted roughly). */
+function jsonBytes(text: string): number {
+  let bytes = 2
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code < 0x20 || code === 0x22 || code === 0x5c) bytes += 6
+    else if (code < 0x80) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else bytes += code >= 0xd800 && code < 0xe000 ? 2 : 3
+  }
+  return bytes + 1
+}
+
+/**
+ * Splits a big pick of files into import requests the engine accepts: at most 500 files and
+ * well under the request size limit each.
+ */
+export function importBatches(files: readonly string[]): string[][] {
+  // Room for the type, the library folder and the folder inside it.
+  const budget = MAX_REQUEST_BYTES - MAX_PATH * 2 - 256
+  const batches: string[][] = []
+  let batch: string[] = []
+  let bytes = 0
+  for (const file of files) {
+    const size = jsonBytes(file)
+    if (batch.length > 0 && (batch.length >= MAX_FILES || bytes + size > budget)) {
+      batches.push(batch)
+      batch = []
+      bytes = 0
+    }
+    batch.push(file)
+    bytes += size
+  }
+  if (batch.length > 0) batches.push(batch)
+  return batches
 }
 
 const isPath = (value: unknown): value is string =>

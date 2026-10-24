@@ -1,6 +1,6 @@
 import { constants } from 'fs'
 import { copyFile, mkdir, realpath, stat } from 'fs/promises'
-import { basename, isAbsolute, join, relative, sep } from 'path'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'path'
 import { numberedName, plainPath, type PanelRequest, type RequestResult } from '@catalog/requests'
 import { kindForFile } from '@shared/media-types'
 import type { RootRecord } from '@shared/library'
@@ -237,11 +237,13 @@ export class RequestHandler {
 
   private async addFolder(picked: string): Promise<[boolean, string]> {
     // Older panels pass on the picker's file:// URL as it is.
-    const path = plainPath(picked)
-    if (!isAbsolute(path)) {
+    const plain = plainPath(picked)
+    if (!isAbsolute(plain)) {
       return [false, `Couldn't add that folder: "${picked}" isn't a full folder location.`]
     }
-    const existing = this.repo.listRoots().find((root) => root.path === path)
+    // "/Volumes/X/" and "/Volumes/X", or "C:/Clips" and "C:\Clips", are the same folder.
+    const path = resolve(plain)
+    const existing = this.repo.listRoots().find((root) => resolve(root.path) === path)
     if (existing) return [true, `${existing.label} is already in the library`]
     try {
       const root = await this.library.addRoot(path)

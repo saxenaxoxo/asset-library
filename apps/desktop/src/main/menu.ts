@@ -8,7 +8,7 @@ import { Menu, type MenuItemConstructorOptions } from 'electron'
 export function applyAppMenu(
   platform: NodeJS.Platform,
   productName: string,
-  actions: { uninstall?: () => void } = {}
+  actions: { uninstall?: () => void; quit?: () => void } = {}
 ): void {
   if (platform !== 'darwin') {
     Menu.setApplicationMenu(null)
@@ -27,7 +27,14 @@ export function applyAppMenu(
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit' }
+        // Our own Quit asks first: the Premiere panel needs the app running.
+        actions.quit
+          ? {
+              label: `Quit ${productName}…`,
+              accelerator: 'CommandOrControl+Q',
+              click: actions.quit
+            }
+          : { role: 'quit' }
       ]
     },
     {
