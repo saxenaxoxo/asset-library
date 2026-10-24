@@ -4,6 +4,11 @@
 
 - Fixed: adding a library folder from the Premiere panel failed with "its location wasn't complete" when the folder's path contained spaces or other special characters. Adobe's folder picker reports such folders as a `file://` address; the panel and the app now turn it into a normal path. Importing files had the same problem and is fixed too.
 
+## 0.2.1 (Mac)
+
+- Fixed: after some hours, the Premiere panel could say Goated Panels Hub wasn't running (and offer to start it) while the Hub said it was. Inside the Hub, file work had stopped answering, which froze its "I'm alive" signal for good. Now a signal that doesn't finish is given up on so the next one runs, and a watchdog notices if the Hub's file work stops answering and restarts the Hub quietly in the background (noted in `engine-restarts.log` in its data folder).
+- Fixed: quitting could stop halfway if a clean-up step failed; it now always finishes.
+
 ## 0.2.0 (Mac), panel 0.4.4
 
 ### Fixed in the Premiere panel

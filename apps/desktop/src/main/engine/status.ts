@@ -34,6 +34,12 @@ export interface StatusSource {
 
 /** How long quitting waits for a status write in progress before removing engine.json. */
 const SHUTDOWN_WAIT_MS = 1000
+/**
+ * A heartbeat write that hasn't finished by now is given up on, so the next beat can run. One file
+ * call that never answered used to stop every later heartbeat, and the panel then said the Hub
+ * wasn't running while it was.
+ */
+export const WRITE_TIMEOUT_MS = 10_000
 
 /** Total size of the files directly inside `dir` (the media cache is flat). */
 export async function folderBytes(dir: string): Promise<number> {
@@ -166,7 +172,7 @@ export class EngineStatusWriter {
       this.again = true
       return this.writing
     }
-    this.writing = (async () => {
+    const work = (async () => {
       try {
         const status = await this.status()
         if (this.stopped) return
@@ -181,6 +187,13 @@ export class EngineStatusWriter {
         // A missed beat is harmless; the next one retries.
       }
     })()
+    let timeout: NodeJS.Timeout | undefined
+    this.writing = Promise.race([
+      work,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, WRITE_TIMEOUT_MS)
+      })
+    ]).finally(() => clearTimeout(timeout))
     try {
       await this.writing
     } finally {

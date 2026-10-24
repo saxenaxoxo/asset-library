@@ -10,7 +10,15 @@ import { createMainWindow, mainWindow, RENDERER_INDEX } from './window'
 import { registerIpcHandlers } from './ipc'
 import { registerInstallerHandlers } from './ipc/installer'
 import { installerStatus } from './engine/installer-status'
-import { copyFileSync, existsSync, readdirSync, readFileSync, realpathSync } from 'fs'
+import {
+  appendFileSync,
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync
+} from 'fs'
+import { stat } from 'fs/promises'
 import { openDatabase } from './library/database'
 import { migrate, needsMigration } from './library/migrations'
 import { LibraryRepository } from './library/repository'
@@ -25,6 +33,7 @@ import { EngineStatusWriter, statusLine } from './engine/status'
 import { SettingsStore } from './engine/settings'
 import { electronLoginItem, openedAtLogin } from './engine/login-item'
 import { EngineTray } from './engine/tray'
+import { IoWatchdog } from './engine/io-watchdog'
 import { AudioPlayer } from './engine/audio-player'
 import { PanelInstaller, type UpiaRun } from './engine/panel-installer'
 import { PanelDelivery } from './engine/panel-delivery'
@@ -449,20 +458,50 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       refreshTray()
     })
 
+    // If the engine's file work stops answering, restart quietly in the background (see
+    // io-watchdog.ts). Logged, so how often it happens can be checked.
+    const ioWatchdog = new IoWatchdog({
+      probe: () => stat(app.getPath('userData')),
+      onStall: (stalledForMs) => {
+        try {
+          appendFileSync(
+            join(app.getPath('userData'), 'engine-restarts.log'),
+            `${new Date().toISOString()} file work stopped answering for ${Math.round(stalledForMs / 1000)} s; restarting\n`
+          )
+        } catch {
+          // The restart matters more than the note.
+        }
+        app.relaunch({
+          args: [...process.argv.slice(1).filter((arg) => arg !== BACKGROUND_FLAG), BACKGROUND_FLAG]
+        })
+        app.quit()
+      }
+    })
+
     // Order matters: stop scheduling work, stop the worker, then close the database. Runs once.
     let engineStopped = false
     const shutDownEngine = (): void => {
       if (engineStopped) return
       engineStopped = true
-      panelRequests.stop()
-      engineStatus.stop()
-      engineStatus.removeFile()
-      audio.destroy()
-      updates.stop()
-      tray.destroy()
-      library.stop()
-      worker.stop()
-      db.close()
+      ioWatchdog.stop()
+      // Each step on its own: one that fails (say, in a broken state) mustn't stop the rest.
+      for (const step of [
+        () => panelRequests.stop(),
+        () => engineStatus.stop(),
+        () => engineStatus.removeFile(),
+        () => audio.destroy(),
+        () => updates.stop(),
+        () => tray.destroy(),
+        () => library.stop(),
+        () => worker.stop(),
+        () => db.close()
+      ]) {
+        try {
+          step()
+        } catch {
+          // Quitting carries on regardless.
+        }
+      }
     }
 
     // Quitting removes engine.json first, so the panel shows "not running" at once (a status write
@@ -477,8 +516,11 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       audio.destroy()
       updates.stop()
       void engineStatus.shutdown().finally(() => {
-        shutDownEngine()
-        app.exit(0)
+        try {
+          shutDownEngine()
+        } finally {
+          app.exit(0)
+        }
       })
     })
     app.on('will-quit', shutDownEngine)
@@ -579,6 +621,7 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
     library.start()
     panelRequests.start()
     engineStatus.start()
+    if (app.isPackaged) ioWatchdog.start()
     // Installed builds only: development and test runs never reach the network or Premiere.
     if (app.isPackaged && !process.env['ASSET_LIBRARY_NO_UPDATE_CHECK']) updates.start()
     if (installedCopy && !process.env['ASSET_LIBRARY_NO_PANEL_INSTALL']) {
