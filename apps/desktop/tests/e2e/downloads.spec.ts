@@ -11,7 +11,7 @@ import {
 import http, { type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 import { OFFLINE_MANIFEST_URL } from './fixtures'
 
@@ -198,6 +198,16 @@ test('refuses a download that fails verification and installs nothing', async ()
   fixture.done()
 })
 
+/** True when the packaged app under test carries the signed CEP panel. */
+function bundlesCepPanel(executable: string): boolean {
+  const resources =
+    process.platform === 'darwin'
+      ? join(dirname(dirname(executable)), 'Resources')
+      : join(dirname(executable), 'resources')
+  const panels = join(resources, 'premiere-panel')
+  return existsSync(panels) && readdirSync(panels).some((name) => name.endsWith('.zxp'))
+}
+
 test('says when it is offline and falls back to the built-in panel', async () => {
   const fixture = setUp({ premiere: ['26.5.2'], cep: [], uxp: [] })
   const app = await launch(fixture.userDataDir, fixture.stateFile, OFFLINE_MANIFEST_URL)
@@ -209,12 +219,18 @@ test('says when it is offline and falls back to the built-in panel', async () =>
   ).toBeVisible({
     timeout: 20_000
   })
-  if (process.env['E2E_EXECUTABLE']) {
-    // An installed build carries the panel, so Install still works offline.
+  const executable = process.env['E2E_EXECUTABLE']
+  if (executable && bundlesCepPanel(executable)) {
+    // A build that carries the panel installs it offline from its own copy.
     await expect(
       page.getByText('Install uses the panel built into Goated Panels Hub.')
     ).toBeVisible()
     await expect(primary).toBeEnabled()
+  } else if (executable) {
+    // CI builds can't sign the CEP panel (no ZXPSignCmd there), so they carry only the UXP one,
+    // which Premiere Pro 26 doesn't take: offline, there's nothing suitable to install.
+    await expect(primary).toBeDisabled()
+    await expect(page.getByRole('status')).toContainText("doesn't include the CEP build")
   } else {
     // A development build has no panel of its own: nothing to install, and it says why.
     await expect(primary).toBeDisabled()
