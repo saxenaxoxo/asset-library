@@ -82,7 +82,7 @@ Ideas and bugs are tracked in [Issues](https://github.com/saxenaxoxo/asset-libra
 
 ## FAQ
 
-**Is it free?** Yes. Asset Library is free to use, and the code is MIT-licensed.
+**Is it free?** Yes. Asset Library is free and open source under the [MIT licence](LICENSE).
 
 **Does it upload my files or track me?** No. There's no account and no analytics. Your library lives on
 your Mac. The Hub contacts GitHub only to check for a newer version (optional, once a day) and to read
