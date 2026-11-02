@@ -14,10 +14,10 @@ jobs:
   check:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with: { version: 11 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
@@ -27,14 +27,14 @@ jobs:
     needs: check
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with: { version: 11 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - name: Cache FFmpeg builds
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: apps/desktop/resources/ffmpeg/darwin-*
           key: ffmpeg-mac-${{ hashFiles('apps/desktop/scripts/ffmpeg/build-macos.sh') }}
@@ -48,7 +48,7 @@ jobs:
         run: pnpm --filter asset-library exec playwright test
         env:
           E2E_EXECUTABLE: ${{ github.workspace }}/apps/desktop/dist/mac-arm64/Goated Panels Hub.app/Contents/MacOS/Goated Panels Hub
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: asset-library-macos
           path: apps/desktop/dist/*.dmg
@@ -56,7 +56,7 @@ jobs:
         run: pnpm --filter asset-library-premiere-panel test:harness
       - name: Package the Premiere Pro panel
         run: pnpm panel:package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: asset-library-premiere-panel
           path: apps/premiere-panel/release/*.ccx
@@ -65,16 +65,16 @@ jobs:
     needs: check
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with: { version: 11 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       # Unit tests on Windows catch path handling (drive letters, backslashes, UNC) that macOS can't.
       - run: pnpm check
       - name: Cache FFmpeg download
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache/ffmpeg-win/*.zip
           key: ffmpeg-win-${{ hashFiles('apps/desktop/scripts/ffmpeg/fetch-windows.sh') }}
@@ -108,7 +108,7 @@ jobs:
           if (Test-Path "$env:INSTALL_DIR\Goated Panels Hub.exe") { throw 'Uninstaller left the app behind' }
       - name: Test the Premiere Pro panel on Windows (mocked host)
         run: pnpm --filter asset-library-premiere-panel test:harness
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: asset-library-windows
           path: apps/desktop/dist/*-setup.exe
