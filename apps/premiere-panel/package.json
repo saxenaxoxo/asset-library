@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@adobe/premierepro": "26.5.1",
-    "@playwright/test": "^1.64.0",
+    "@playwright/test": "^1.64.1",
     "electron": "44.7.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3",
