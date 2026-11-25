@@ -34,6 +34,7 @@ import { SettingsStore } from './engine/settings'
 import { electronLoginItem, openedAtLogin } from './engine/login-item'
 import { EngineTray } from './engine/tray'
 import { IoWatchdog } from './engine/io-watchdog'
+import { EXIT_GRACE_MS, exitGuardCommand } from './engine/exit-guard'
 import { AudioPlayer } from './engine/audio-player'
 import { PanelInstaller, type UpiaRun } from './engine/panel-installer'
 import { PanelDelivery } from './engine/panel-delivery'
@@ -73,6 +74,36 @@ registerAssetScheme()
 
 /** Set once quitting has begun, so closing windows on the way out isn't "closed by the editor". */
 let quitting = false
+
+/** Set by the file-work watchdog: start again, in the background, once this run has exited. */
+let relaunchAfterExit = false
+let exitGuardArmed = false
+
+/**
+ * Starts a tiny separate process that ends this one if it hasn't exited within EXIT_GRACE_MS
+ * (and restarts it when the watchdog asked). See exit-guard.ts.
+ */
+function armExitGuard(): void {
+  if (exitGuardArmed) return
+  exitGuardArmed = true
+  try {
+    // The restart only ever carries the background flag: never a launch URL or other argument.
+    const { file, args, env } = exitGuardCommand({
+      platform: process.platform,
+      pid: process.pid,
+      graceMs: EXIT_GRACE_MS,
+      relaunch: relaunchAfterExit ? { file: process.execPath, args: [BACKGROUND_FLAG] } : undefined
+    })
+    spawn(file, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, ...env }
+    }).unref()
+  } catch {
+    // Quitting goes ahead without the guard.
+  }
+}
 /** Called when the editor closes the window and the engine keeps running. Set once ready. */
 let onWindowClosedByEditor: () => void = () => {}
 
@@ -436,7 +467,10 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
         app.focus({ steal: true })
         await dialog.showMessageBox({ type: kind, message, detail })
       },
-      exit: () => app.exit(0)
+      exit: () => {
+        armExitGuard()
+        app.exit(0)
+      }
     })
     applyAppMenu(process.platform, productName, {
       uninstall: () => void uninstaller.run(),
@@ -471,9 +505,8 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
         } catch {
           // The restart matters more than the note.
         }
-        app.relaunch({
-          args: [...process.argv.slice(1).filter((arg) => arg !== BACKGROUND_FLAG), BACKGROUND_FLAG]
-        })
+        // The exit guard does the restart: Electron's own relaunch only runs if exiting finishes.
+        relaunchAfterExit = true
         app.quit()
       }
     })
@@ -512,6 +545,7 @@ if (dataFolder.quit || !app.requestSingleInstanceLock()) {
       if (quitting) return
       quitting = true
       event.preventDefault()
+      armExitGuard()
       panelRequests.stop()
       audio.destroy()
       updates.stop()
